@@ -693,212 +693,222 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                         </p>
                     </div>
                 ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                            <thead>
-                                <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--gray-100)' }}>
-                                    {([
-                                        { key: 'fecha', label: 'Fecha Programada' },
-                                        { key: 'paciente', label: 'Paciente' },
-                                        { key: 'medicamento', label: 'Medicamento' },
-                                        { key: 'eps', label: 'EPS / Ciudad' },
-                                        { key: 'ciclo', label: 'Ciclo' },
-                                        { key: 'estado', label: 'Estado' },
-                                        { key: null, label: 'Acciones' },
-                                    ] as { key: string | null; label: string }[]).map(col => (
-                                        <th
-                                            key={col.label}
-                                            onClick={col.key ? () => handleSort(col.key!) : undefined}
-                                            style={{
-                                                padding: '12px 14px',
-                                                textAlign: 'center',
-                                                fontSize: 11, fontWeight: 700,
-                                                color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
-                                                textTransform: 'uppercase',
-                                                letterSpacing: 0.5, whiteSpace: 'nowrap',
-                                                cursor: col.key ? 'pointer' : 'default',
-                                                userSelect: 'none',
-                                                transition: 'color 0.15s',
-                                            }}
-                                        >
-                                            {col.label}{col.key ? sortIcon(col.key) : null}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {currentItems.map((d, i) => {
-                                    const isVencido = esEntregaVencida(d);
-                                    const isUrgente = esEntregaUrgente(d.fechaProgramada);
-                                    const rowBg = d.confirmado ? '#f0fdf4' : isVencido ? '#fff5f5' : isUrgente ? '#fffbeb' : i % 2 === 0 ? 'white' : '#fafafa';
+                    <>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                <thead>
+                                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--gray-100)' }}>
+                                        {([
+                                            { key: 'fecha', label: 'Fecha Programada' },
+                                            { key: 'paciente', label: 'Paciente' },
+                                            { key: 'medicamento', label: 'Medicamento' },
+                                            { key: 'eps', label: 'EPS / Ciudad' },
+                                            { key: 'ciclo', label: 'Ciclo' },
+                                            { key: 'estado', label: 'Estado' },
+                                            { key: null, label: 'Acciones' },
+                                        ] as { key: string | null; label: string }[]).map(col => (
+                                            <th
+                                                key={col.label}
+                                                onClick={col.key ? () => handleSort(col.key!) : undefined}
+                                                style={{
+                                                    padding: '12px 14px',
+                                                    textAlign: 'center',
+                                                    fontSize: 11, fontWeight: 700,
+                                                    color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
+                                                    textTransform: 'uppercase',
+                                                    letterSpacing: 0.5, whiteSpace: 'nowrap',
+                                                    cursor: col.key ? 'pointer' : 'default',
+                                                    userSelect: 'none',
+                                                    transition: 'color 0.15s',
+                                                }}
+                                            >
+                                                {col.label}{col.key ? sortIcon(col.key) : null}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {currentItems.map((d, i) => {
+                                        const isVencido = esEntregaVencida(d);
+                                        const isUrgente = esEntregaUrgente(d.fechaProgramada);
+                                        const rowBg = d.confirmado ? '#f0fdf4' : isVencido ? '#fff5f5' : isUrgente ? '#fffbeb' : i % 2 === 0 ? 'white' : '#fafafa';
 
-                                    return (
-                                        <tr key={d.id} style={{ background: rowBg, borderBottom: '1px solid var(--gray-100)', transition: 'background 0.2s' }}>
-                                            <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center' }}>
-                                                    <Calendar size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
-                                                    <div style={{ textAlign: 'center' }}>
-                                                        <div style={{ fontWeight: 700, color: 'var(--gray-800)' }}>{d.fechaProgramada}</div>
-                                                        <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{formatFechaEntrega(d.fechaProgramada)}</div>
+                                        return (
+                                            <tr key={d.id} style={{ background: rowBg, borderBottom: '1px solid var(--gray-100)', transition: 'background 0.2s' }}>
+                                                <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center' }}>
+                                                        <Calendar size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                                                        <div style={{ textAlign: 'center' }}>
+                                                            <div style={{ fontWeight: 700, color: 'var(--gray-800)' }}>{d.fechaProgramada}</div>
+                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{formatFechaEntrega(d.fechaProgramada)}</div>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'left' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start' }}>
-                                                    <User size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'left' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start' }}>
+                                                        <User size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                                                        <div style={{ textAlign: 'left' }}>
+                                                            <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombreCompleto}</div>
+                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.pacienteId}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'left' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start' }}>
+                                                        <Pill size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
+                                                        <div style={{ textAlign: 'left' }}>
+                                                            <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.medicamento}</div>
+                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.dosis}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'left' }}>
                                                     <div style={{ textAlign: 'left' }}>
-                                                        <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombreCompleto}</div>
-                                                        <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.pacienteId}</div>
+                                                        <div style={{ fontWeight: 500, color: 'var(--gray-700)', fontSize: 12 }}>{d.eps || '—'}</div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--gray-400)', justifyContent: 'flex-start' }}>
+                                                            <MapPin size={11} />{d.municipio || '—'}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'left' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start' }}>
-                                                    <Pill size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
-                                                    <div style={{ textAlign: 'left' }}>
-                                                        <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.medicamento}</div>
-                                                        <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.dosis}</div>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                                                    <span style={{
+                                                        padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                                                        background: d.ciclo === 'Quincenal' ? '#fef3c7' : d.ciclo === 'Semanal' ? '#ede9fe' : '#eff6ff',
+                                                        color: d.ciclo === 'Quincenal' ? '#b45309' : d.ciclo === 'Semanal' ? '#7c3aed' : '#2563eb',
+                                                        display: 'inline-block'
+                                                    }}>
+                                                        {d.ciclo}
+                                                    </span>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <EstadoBadge despacho={d} />
+                                                        {d.confirmado && d.fechaConfirmacion && (
+                                                            <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>
+                                                                {d.fechaConfirmacion}
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'left' }}>
-                                                <div style={{ textAlign: 'left' }}>
-                                                    <div style={{ fontWeight: 500, color: 'var(--gray-700)', fontSize: 12 }}>{d.eps || '—'}</div>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--gray-400)', justifyContent: 'flex-start' }}>
-                                                        <MapPin size={11} />{d.municipio || '—'}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                <span style={{
-                                                    padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                                                    background: d.ciclo === 'Quincenal' ? '#fef3c7' : d.ciclo === 'Semanal' ? '#ede9fe' : '#eff6ff',
-                                                    color: d.ciclo === 'Quincenal' ? '#b45309' : d.ciclo === 'Semanal' ? '#7c3aed' : '#2563eb',
-                                                    display: 'inline-block'
-                                                }}>
-                                                    {d.ciclo}
-                                                </span>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                                                    <EstadoBadge despacho={d} />
-                                                    {d.confirmado && d.fechaConfirmacion && (
-                                                        <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>
-                                                            {d.fechaConfirmacion}
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                                                    {!d.confirmado ? (
+                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                            <button
+                                                                onClick={() => handleConfirmar(d)}
+                                                                disabled={confirmandoId === d.id}
+                                                                style={{
+                                                                    padding: '6px 10px', borderRadius: 8, border: 'none',
+                                                                    background: '#16a34a', color: 'white', cursor: 'pointer',
+                                                                    fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4,
+                                                                    opacity: confirmandoId === d.id ? 0.6 : 1, transition: 'all 0.2s',
+                                                                }}
+                                                                title="Confirmar Entrega"
+                                                            >
+                                                                Confirmar
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setActionModal({ type: 'Cancelar', despacho: d });
+                                                                    setActionValue('Paciente no requiere medicamento');
+                                                                }}
+                                                                style={{
+                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #dc2626',
+                                                                    background: 'transparent', color: '#dc2626', cursor: 'pointer',
+                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+                                                                }}
+                                                                title="Cancelar Entrega"
+                                                            >
+                                                                Cancelar
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setActionModal({ type: 'Posponer', despacho: d })}
+                                                                style={{
+                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #2563eb',
+                                                                    background: 'transparent', color: '#2563eb', cursor: 'pointer',
+                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+                                                                }}
+                                                                title="Posponer Entrega"
+                                                            >
+                                                                Posponer
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setActionModal({ type: 'Suspender', despacho: d })}
+                                                                style={{
+                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #4b5563',
+                                                                    background: 'transparent', color: '#4b5563', cursor: 'pointer',
+                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+                                                                }}
+                                                                title="Suspender Entrega"
+                                                            >
+                                                                Suspender
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                                                            <span style={{ fontSize: 12, color: d.estadoActual === 'Cancelado' ? '#dc2626' : d.estadoActual === 'Suspendido' ? '#4b5563' : '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                                                                {d.estadoActual === 'Cancelado' ? '✕ Cancelado' : d.estadoActual === 'Suspendido' ? '⏸ Suspendido' : '✓ Despachado'}
+                                                            </span>
+                                                            {d.motivo && <span style={{ fontSize: 10, color: 'var(--gray-500)', fontStyle: 'italic', textAlign: 'center' }}>{d.motivo}</span>}
                                                         </div>
                                                     )}
-                                                </div>
-                                            </td>
-                                            <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                {!d.confirmado ? (
-                                                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                        <button
-                                                            onClick={() => handleConfirmar(d)}
-                                                            disabled={confirmandoId === d.id}
-                                                            style={{
-                                                                padding: '6px 10px', borderRadius: 8, border: 'none',
-                                                                background: '#16a34a', color: 'white', cursor: 'pointer',
-                                                                fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4,
-                                                                opacity: confirmandoId === d.id ? 0.6 : 1, transition: 'all 0.2s',
-                                                            }}
-                                                            title="Confirmar Entrega"
-                                                        >
-                                                            Confirmar
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                setActionModal({ type: 'Cancelar', despacho: d });
-                                                                setActionValue('Paciente no requiere medicamento');
-                                                            }}
-                                                            style={{
-                                                                padding: '6px 10px', borderRadius: 8, border: '1px solid #dc2626',
-                                                                background: 'transparent', color: '#dc2626', cursor: 'pointer',
-                                                                fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                            }}
-                                                            title="Cancelar Entrega"
-                                                        >
-                                                            Cancelar
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setActionModal({ type: 'Posponer', despacho: d })}
-                                                            style={{
-                                                                padding: '6px 10px', borderRadius: 8, border: '1px solid #2563eb',
-                                                                background: 'transparent', color: '#2563eb', cursor: 'pointer',
-                                                                fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                            }}
-                                                            title="Posponer Entrega"
-                                                        >
-                                                            Posponer
-                                                        </button>
-                                                        <button
-                                                            onClick={() => setActionModal({ type: 'Suspender', despacho: d })}
-                                                            style={{
-                                                                padding: '6px 10px', borderRadius: 8, border: '1px solid #4b5563',
-                                                                background: 'transparent', color: '#4b5563', cursor: 'pointer',
-                                                                fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                            }}
-                                                            title="Suspender Entrega"
-                                                        >
-                                                            Suspender
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                                                        <span style={{ fontSize: 12, color: d.estadoActual === 'Cancelado' ? '#dc2626' : d.estadoActual === 'Suspendido' ? '#4b5563' : '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                                                            {d.estadoActual === 'Cancelado' ? '✕ Cancelado' : d.estadoActual === 'Suspendido' ? '⏸ Suspendido' : '✓ Despachado'}
-                                                        </span>
-                                                        {d.motivo && <span style={{ fontSize: 10, color: 'var(--gray-500)', fontStyle: 'italic', textAlign: 'center' }}>{d.motivo}</span>}
-                                                    </div>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+
+                        </div>
 
                         {/* Controles de Paginación */}
                         <div style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            gap: 16, padding: '12px 16px', borderTop: '1px solid var(--gray-100)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            gap: 16, padding: '16px 32px', borderTop: '1px solid var(--gray-100)',
                             background: '#f8fafc', flexWrap: 'wrap',
                         }}>
-                            <button
-                                disabled={currentPage === 1}
-                                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px',
-                                    borderRadius: 8, border: '1.5px solid var(--gray-200)',
-                                    background: 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                                    fontSize: 12, fontWeight: 600, color: 'var(--gray-600)',
-                                    opacity: currentPage === 1 ? 0.5 : 1,
-                                }}>
-                                <ChevronLeft size={16} /> Anterior
-                            </button>
+                            <div style={{ fontSize: 13, color: 'var(--gray-500)', fontWeight: 500 }}>
+                                Total: <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{despachosFiltrados.length}</span> registros encontrados
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                <button
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                        borderRadius: 12, border: '1.5px solid var(--gray-200)',
+                                        background: 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                                        fontSize: 13, fontWeight: 600, color: 'var(--gray-700)',
+                                        opacity: currentPage === 1 ? 0.6 : 1,
+                                    }}>
+                                    <ChevronLeft size={16} /> Anterior
+                                </button>
 
-                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)' }}>
-                                Página {currentPage} de {Math.max(1, totalPages)}
-                            </span>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)', minWidth: 100, textAlign: 'center' }}>
+                                    Página {currentPage} de {Math.max(1, totalPages)}
+                                </span>
 
-                            <button
-                                disabled={currentPage >= totalPages}
-                                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                                style={{
-                                    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px',
-                                    borderRadius: 8, border: '1.5px solid var(--gray-200)',
-                                    background: 'white', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
-                                    fontSize: 12, fontWeight: 600, color: 'var(--gray-600)',
-                                    opacity: currentPage >= totalPages ? 0.5 : 1,
-                                }}>
-                                Siguiente <ChevronRight size={16} />
-                            </button>
+                                <button
+                                    disabled={currentPage >= totalPages}
+                                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                    style={{
+                                        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                        borderRadius: 12, border: '1.5px solid var(--gray-200)',
+                                        background: 'white', cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
+                                        fontSize: 13, fontWeight: 600, color: 'var(--gray-700)',
+                                        opacity: currentPage >= totalPages ? 0.6 : 1,
+                                    }}>
+                                    Siguiente <ChevronRight size={16} />
+                                </button>
+                            </div>
                         </div>
+
                         {despachosFiltrados.length === 0 && (
-                            <div style={{ padding: '30px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 13 }}>
-                                No hay entregas que coincidan con los filtros aplicados.
+                            <div style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--gray-400)', fontSize: 14 }}>
+                                <AlertTriangle size={40} style={{ marginBottom: 16, opacity: 0.5 }} />
+                                <div>No hay entregas que coincidan con los filtros aplicados en este periodo.</div>
                             </div>
                         )}
-                    </div>
+                    </>
                 )}
             </div>
 

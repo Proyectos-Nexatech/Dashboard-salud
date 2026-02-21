@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Building2, Trash2, Plus, Pencil, CheckCircle, XCircle } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Search, Building2, Trash2, Plus, Pencil, CheckCircle, XCircle, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { EntidadInfo } from '../services/epsService';
 import ConfirmModal from '../components/ConfirmModal';
 import EntidadFormModal from '../components/EntidadFormModal';
@@ -21,7 +21,11 @@ export default function Entidades({
 }: EntidadesProps) {
     const [search, setSearch] = useState('');
     const [page, setPage] = useState(1);
-    const perPage = 10;
+
+    // Sorting and Pagination state
+    const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [sortCol, setSortCol] = useState<string | null>(null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
     // CRUD state
     const [showForm, setShowForm] = useState(false);
@@ -31,12 +35,51 @@ export default function Entidades({
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
-    const filtered = entidades.filter(e =>
-        !search || e.nombre.toLowerCase().includes(search.toLowerCase()) || (e.nit && e.nit.includes(search))
-    );
+    const filteredAndSorted = useMemo(() => {
+        let filtered = entidades.filter(e =>
+            !search || e.nombre.toLowerCase().includes(search.toLowerCase()) || (e.nit && e.nit.includes(search))
+        );
 
-    const paginated = filtered.slice((page - 1) * perPage, page * perPage);
-    const totalPages = Math.ceil(filtered.length / perPage);
+        if (sortCol) {
+            filtered.sort((a: any, b: any) => {
+                const valA = a[sortCol] || '';
+                const valB = b[sortCol] || '';
+
+                if (typeof valA === 'string') {
+                    const cmp = valA.localeCompare(valB, 'es', { sensitivity: 'base' });
+                    return sortDir === 'asc' ? cmp : -cmp;
+                }
+                return sortDir === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+            });
+        }
+
+        return filtered;
+    }, [entidades, search, sortCol, sortDir]);
+
+    const paginated = useMemo(() => {
+        return filteredAndSorted.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+    }, [filteredAndSorted, page, itemsPerPage]);
+
+    const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
+
+    // Reset to page 1 when data changes
+    useEffect(() => {
+        setPage(1);
+    }, [search, itemsPerPage]);
+
+    const handleSort = (col: string) => {
+        if (sortCol === col) {
+            setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortCol(col);
+            setSortDir('asc');
+        }
+    };
+
+    const sortIcon = (col: string) => {
+        if (sortCol !== col) return <span style={{ opacity: 0.3, marginLeft: 6, fontSize: 13 }}>⇅</span>;
+        return <span style={{ marginLeft: 6, fontSize: 13 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
+    };
 
     // Selection helpers
     const allPageSelected = paginated.length > 0 && paginated.every(e => selectedNombres.has(e.nombre));
@@ -120,6 +163,29 @@ export default function Entidades({
                     </div>
                 </div>
 
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginRight: 'auto', marginLeft: 16 }}>
+                    <span style={{ fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>Mostrar</span>
+                    <div style={{ position: 'relative' }}>
+                        <select
+                            value={itemsPerPage}
+                            onChange={e => { setItemsPerPage(Number(e.target.value)); setPage(1); }}
+                            style={{
+                                padding: '7px 32px 7px 12px', borderRadius: 10,
+                                border: '1.5px solid #c7d2fe', fontSize: 12,
+                                fontWeight: 700, color: '#4f46e5',
+                                background: '#eef2ff',
+                                cursor: 'pointer', outline: 'none', appearance: 'none',
+                            }}
+                        >
+                            <option value={10}>10 / página</option>
+                            <option value={25}>25 / página</option>
+                            <option value={50}>50 / página</option>
+                            <option value={100}>100 / página</option>
+                        </select>
+                        <ChevronDown size={13} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#4f46e5', pointerEvents: 'none' }} />
+                    </div>
+                </div>
+
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <button
                         style={{
@@ -174,7 +240,7 @@ export default function Entidades({
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--gray-100)' }}>
                     <h3 className="card-title">Listado de Entidades / EPS</h3>
-                    <p className="card-subtitle">{filtered.length} entidades registradas</p>
+                    <p className="card-subtitle">{filteredAndSorted.length} entidades registradas</p>
                 </div>
                 <div style={{ overflowX: 'auto' }}>
                     <table className="data-table">
@@ -188,10 +254,29 @@ export default function Entidades({
                                         style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary)' }}
                                     />
                                 </th>
-                                <th>Nombre Entidad</th>
-                                <th>NIT</th>
-                                <th style={{ textAlign: 'center' }}>Tipo</th>
-                                <th style={{ textAlign: 'center' }}>Estado</th>
+                                {([
+                                    { key: 'nombre', label: 'Nombre Entidad' },
+                                    { key: 'nit', label: 'NIT' },
+                                    { key: 'tipo', label: 'Tipo' },
+                                    { key: 'activo', label: 'Estado' },
+                                ] as { key: string; label: string }[]).map(col => (
+                                    <th
+                                        key={col.key}
+                                        onClick={() => handleSort(col.key)}
+                                        style={{
+                                            cursor: 'pointer',
+                                            userSelect: 'none',
+                                            color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
+                                            whiteSpace: 'nowrap',
+                                            textAlign: (col.key === 'tipo' || col.key === 'activo') ? 'center' : 'left'
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: (col.key === 'tipo' || col.key === 'activo') ? 'center' : 'flex-start' }}>
+                                            {col.label}
+                                            {sortIcon(col.key)}
+                                        </div>
+                                    </th>
+                                ))}
                                 <th style={{ paddingRight: 32, textAlign: 'center' }}>Acciones</th>
                             </tr>
                         </thead>
@@ -263,22 +348,46 @@ export default function Entidades({
                     </table>
                 </div>
                 {/* Pagination */}
-                <div style={{ padding: '20px 32px', display: 'flex', justifyContent: 'flex-end', gap: 8, background: 'var(--gray-50)', borderTop: '1px solid var(--gray-100)' }}>
-                    <button
-                        disabled={page === 1} onClick={() => setPage(p => p - 1)}
-                        style={{ padding: '8px 16px', border: '1px solid var(--gray-200)', borderRadius: 12, background: 'white', cursor: page === 1 ? 'not-allowed' : 'pointer', color: page === 1 ? 'var(--gray-400)' : 'inherit' }}
-                    >
-                        Anterior
-                    </button>
-                    <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: 13, color: 'var(--text-secondary)' }}>
-                        Página {page} de {totalPages}
-                    </span>
-                    <button
-                        disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
-                        style={{ padding: '8px 16px', border: 'none', borderRadius: 12, background: page === totalPages ? 'var(--gray-200)' : 'var(--primary)', color: page === totalPages ? 'var(--gray-500)' : 'white', cursor: page === totalPages ? 'not-allowed' : 'pointer' }}
-                    >
-                        Siguiente
-                    </button>
+                <div style={{
+                    padding: '16px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    background: '#f8fafc', borderTop: '1px solid var(--gray-100)'
+                }}>
+                    <div style={{ fontSize: 13, color: 'var(--gray-500)', fontWeight: 500 }}>
+                        Total: <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{filteredAndSorted.length}</span> registros encontrados
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <button
+                            disabled={page === 1}
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                border: '1.5px solid var(--gray-200)', borderRadius: 12, background: 'white',
+                                cursor: page === 1 ? 'not-allowed' : 'pointer', fontWeight: 600,
+                                color: page === 1 ? 'var(--gray-400)' : 'var(--gray-700)',
+                                opacity: page === 1 ? 0.6 : 1
+                            }}
+                        >
+                            <ChevronLeft size={16} />
+                            Anterior
+                        </button>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)', minWidth: 100, textAlign: 'center' }}>
+                            Página {page} de {Math.max(1, totalPages)}
+                        </span>
+                        <button
+                            disabled={page >= totalPages}
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                border: '1.5px solid var(--gray-200)', borderRadius: 12, background: 'white',
+                                cursor: page >= totalPages ? 'not-allowed' : 'pointer', fontWeight: 600,
+                                color: page >= totalPages ? 'var(--gray-400)' : 'var(--gray-700)',
+                                opacity: page >= totalPages ? 0.6 : 1
+                            }}
+                        >
+                            Siguiente
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
                 </div>
             </div>
 

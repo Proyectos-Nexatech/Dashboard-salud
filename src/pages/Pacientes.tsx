@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, Download, Eye, X, Plus, Pencil, Trash2 } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Search, Download, Eye, X, Plus, Pencil, Trash2, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { Paciente } from '../data/mockData';
 import { getEstadoBadge } from '../data/mockData';
 import * as XLSX from 'xlsx';
@@ -18,7 +18,6 @@ interface PacientesProps {
 export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDeletePatient, onDeleteBatch, epsList }: PacientesProps) {
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('');
-    const [page, setPage] = useState(1);
     const [selectedPatient, setSelectedPatient] = useState<Paciente | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
@@ -30,22 +29,71 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
-    const perPage = 10;
+    // Sorting and Pagination state
+    const [itemsPerPage, setItemsPerPage] = useState(10);
+    const [sortCol, setSortCol] = useState<string | null>(null);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [page, setPage] = useState(1);
 
-    const filtered = pacientes.filter(p => {
+    const filteredAndSorted = useMemo(() => {
         const searchTerm = search.toLowerCase();
 
-        const matchSearch = !search ||
-            (p.nombreCompleto && p.nombreCompleto.toLowerCase().includes(searchTerm)) ||
-            (p.numeroId && p.numeroId.toString().includes(searchTerm)) ||
-            (p.medicamento && p.medicamento.toLowerCase().includes(searchTerm));
+        let filtered = pacientes.filter(p => {
+            const matchSearch = !search ||
+                (p.nombreCompleto && p.nombreCompleto.toLowerCase().includes(searchTerm)) ||
+                (p.numeroId && p.numeroId.toString().includes(searchTerm)) ||
+                (p.medicamento && p.medicamento.toLowerCase().includes(searchTerm));
 
-        const matchEstado = !filterEstado || p.estado === filterEstado;
-        return matchSearch && matchEstado;
-    });
+            const matchEstado = !filterEstado || p.estado === filterEstado;
+            return matchSearch && matchEstado;
+        });
 
-    const paginated = filtered.slice((page - 1) * perPage, page * perPage);
-    const totalPages = Math.ceil(filtered.length / perPage);
+        if (sortCol) {
+            filtered.sort((a: any, b: any) => {
+                let valA = a[sortCol] || '';
+                let valB = b[sortCol] || '';
+
+                if (sortCol === 'entregas') {
+                    valA = Object.keys(a.entregas).length;
+                    valB = Object.keys(b.entregas).length;
+                    return sortDir === 'asc' ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+                }
+
+                if (typeof valA === 'string') {
+                    const cmp = valA.localeCompare(valB, 'es', { sensitivity: 'base' });
+                    return sortDir === 'asc' ? cmp : -cmp;
+                }
+                return sortDir === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+            });
+        }
+
+        return filtered;
+    }, [pacientes, search, filterEstado, sortCol, sortDir]);
+
+    const paginated = useMemo(() => {
+        return filteredAndSorted.slice((page - 1) * itemsPerPage, page * itemsPerPage);
+    }, [filteredAndSorted, page, itemsPerPage]);
+
+    const totalPages = Math.ceil(filteredAndSorted.length / itemsPerPage);
+
+    // Reset to page 1 when data changes
+    useEffect(() => {
+        setPage(1);
+    }, [search, filterEstado, itemsPerPage]);
+
+    const handleSort = (col: string) => {
+        if (sortCol === col) {
+            setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortCol(col);
+            setSortDir('asc');
+        }
+    };
+
+    const sortIcon = (col: string) => {
+        if (sortCol !== col) return <span style={{ opacity: 0.3, marginLeft: 6, fontSize: 13 }}>⇅</span>;
+        return <span style={{ marginLeft: 6, fontSize: 13 }}>{sortDir === 'asc' ? '↑' : '↓'}</span>;
+    };
 
     // Selection helpers
     const allPageSelected = paginated.length > 0 && paginated.every(p => selectedIds.has(p.numeroId));
@@ -115,8 +163,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
     };
 
     const handleExportCSV = () => {
-        // Preparar datos para exportación con etiquetas en español
-        const exportData = filtered.map(p => ({
+        const exportData = filteredAndSorted.map(p => ({
             'Nombre Completo': p.nombreCompleto,
             'Tipo de ID': p.tipoId,
             'Número de Identificación': p.numeroId,
@@ -189,6 +236,29 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                     </select>
                 </div>
 
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginRight: 'auto', marginLeft: 16 }}>
+                    <span style={{ fontSize: 12, color: 'var(--gray-500)', fontWeight: 500 }}>Mostrar</span>
+                    <div style={{ position: 'relative' }}>
+                        <select
+                            value={itemsPerPage}
+                            onChange={e => { setItemsPerPage(Number(e.target.value)); setPage(1); }}
+                            style={{
+                                padding: '7px 32px 7px 12px', borderRadius: 10,
+                                border: '1.5px solid #c7d2fe', fontSize: 12,
+                                fontWeight: 700, color: '#4f46e5',
+                                background: '#eef2ff',
+                                cursor: 'pointer', outline: 'none', appearance: 'none',
+                            }}
+                        >
+                            <option value={10}>10 / página</option>
+                            <option value={25}>25 / página</option>
+                            <option value={50}>50 / página</option>
+                            <option value={100}>100 / página</option>
+                        </select>
+                        <ChevronDown size={13} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: '#4f46e5', pointerEvents: 'none' }} />
+                    </div>
+                </div>
+
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <button
                         style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 30, background: '#16a34a', color: 'white', border: 'none', padding: '10px 22px', fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
@@ -247,7 +317,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                 <div style={{ padding: '24px 32px', borderBottom: '1px solid var(--gray-100)' }}>
                     <h3 className="card-title">Listado de Pacientes</h3>
-                    <p className="card-subtitle">{filtered.length} registros encontrados</p>
+                    <p className="card-subtitle">{filteredAndSorted.length} registros encontrados</p>
                 </div>
 
                 <table className="data-table">
@@ -262,11 +332,29 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                     title="Seleccionar todos"
                                 />
                             </th>
-                            <th>Paciente</th>
-                            <th>EPS / Municipio</th>
-                            <th>Medicamento</th>
-                            <th>Estado</th>
-                            <th>Entregas Año</th>
+                            {([
+                                { key: 'nombreCompleto', label: 'Paciente' },
+                                { key: 'eps', label: 'EPS / Municipio' },
+                                { key: 'medicamento', label: 'Medicamento' },
+                                { key: 'estado', label: 'Estado' },
+                                { key: 'entregas', label: 'Entregas Año' },
+                            ] as { key: string; label: string }[]).map(col => (
+                                <th
+                                    key={col.key}
+                                    onClick={() => handleSort(col.key)}
+                                    style={{
+                                        cursor: 'pointer',
+                                        userSelect: 'none',
+                                        color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                                        {col.label}
+                                        {sortIcon(col.key)}
+                                    </div>
+                                </th>
+                            ))}
                             <th style={{ paddingRight: 32, textAlign: 'center' }}>Acciones</th>
                         </tr>
                     </thead>
@@ -364,23 +452,47 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                     </tbody>
                 </table>
 
-                {/* Pagination Footer */}
-                <div style={{ padding: '20px 32px', display: 'flex', justifyContent: 'flex-end', gap: 8, background: 'var(--gray-50)' }}>
-                    <button
-                        disabled={page === 1} onClick={() => setPage(p => p - 1)}
-                        style={{ padding: '8px 16px', border: '1px solid var(--gray-200)', borderRadius: 12, background: 'white', cursor: page === 1 ? 'not-allowed' : 'pointer', color: page === 1 ? 'var(--gray-400)' : 'inherit' }}
-                    >
-                        Anterior
-                    </button>
-                    <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: 13, color: 'var(--text-secondary)' }}>
-                        Página {page} de {totalPages}
-                    </span>
-                    <button
-                        disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
-                        style={{ padding: '8px 16px', border: 'none', borderRadius: 12, background: page === totalPages ? 'var(--gray-200)' : 'var(--primary)', color: page === totalPages ? 'var(--gray-500)' : 'white', cursor: page === totalPages ? 'not-allowed' : 'pointer' }}
-                    >
-                        Siguiente
-                    </button>
+                {/* Pagination */}
+                <div style={{
+                    padding: '16px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    background: '#f8fafc', borderTop: '1px solid var(--gray-100)'
+                }}>
+                    <div style={{ fontSize: 13, color: 'var(--gray-500)', fontWeight: 500 }}>
+                        Total: <span style={{ color: 'var(--primary)', fontWeight: 700 }}>{filteredAndSorted.length}</span> registros encontrados
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <button
+                            disabled={page === 1}
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                border: '1.5px solid var(--gray-200)', borderRadius: 12, background: 'white',
+                                cursor: page === 1 ? 'not-allowed' : 'pointer', fontWeight: 600,
+                                color: page === 1 ? 'var(--gray-400)' : 'var(--gray-700)',
+                                opacity: page === 1 ? 0.6 : 1
+                            }}
+                        >
+                            <ChevronLeft size={16} />
+                            Anterior
+                        </button>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-700)', minWidth: 100, textAlign: 'center' }}>
+                            Página {page} de {Math.max(1, totalPages)}
+                        </span>
+                        <button
+                            disabled={page >= totalPages}
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px',
+                                border: '1.5px solid var(--gray-200)', borderRadius: 12, background: 'white',
+                                cursor: page >= totalPages ? 'not-allowed' : 'pointer', fontWeight: 600,
+                                color: page >= totalPages ? 'var(--gray-400)' : 'var(--gray-700)',
+                                opacity: page >= totalPages ? 0.6 : 1
+                            }}
+                        >
+                            Siguiente
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -558,7 +670,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                 onClose={() => setIsExportModalOpen(false)}
                 onConfirm={handleExportCSV}
                 title="Confirmar exportación"
-                message={`Se generará un archivo CSV con la información de los ${filtered.length} pacientes filtrados. ¿Deseas continuar con la descarga?`}
+                message={`Se generará un archivo CSV con la información de los ${filteredAndSorted.length} pacientes filtrados. ¿Deseas continuar con la descarga?`}
                 confirmText="Exportar ahora"
                 cancelText="Cancelar"
                 type="info"
