@@ -3,6 +3,10 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
     plugins: [react()],
+    base: '/Dashboard-salud/', // Requerido para GitHub Pages
+    build: {
+        outDir: 'dist',
+    },
     server: {
         port: 5173
     }
