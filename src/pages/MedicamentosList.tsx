@@ -74,6 +74,12 @@ export default function MedicamentosList({
         setPage(1);
     }, [search, itemsPerPage]);
 
+    const formatCurrency = (val: any) => {
+        const num = Number(val);
+        if (isNaN(num)) return '$ 0';
+        return `$ ${num.toLocaleString('es-CO')}`;
+    };
+
     const handleSort = (col: string) => {
         if (sortCol === col) {
             setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -119,10 +125,21 @@ export default function MedicamentosList({
 
     // CRUD handlers
     const handleSaveMed = async (m: MedicamentoInfo, originalName?: string) => {
-        if (editingMed && onEditMed) {
-            await onEditMed(m, originalName);
-        } else if (onAddMed) {
-            await onAddMed(m);
+        console.log('Attempting to save medication:', { m, originalName });
+        try {
+            if (editingMed && onEditMed) {
+                console.log('Calling onEditMed...');
+                await onEditMed(m, originalName);
+            } else if (onAddMed) {
+                console.log('Calling onAddMed...');
+                await onAddMed(m);
+            }
+            console.log('Save successful, closing form.');
+            setShowForm(false);
+            setEditingMed(null);
+        } catch (err) {
+            console.error('Error in handleSaveMed:', err);
+            alert('Error al guardar el medicamento. Por favor revise la consola.');
         }
     };
 
@@ -181,13 +198,15 @@ export default function MedicamentosList({
     const downloadTemplate = () => {
         const headers = [
             'ATC',
-            'DESCRIPCION_ATC'
+            'DESCRIPCION_ATC',
+            'PRECIO_COMPRA',
+            'PRECIO_VENTA'
         ];
         const example = [
-            'L01EF03', 'ABEMACILIB X 150 MILIGRAMOS'
+            'L01EF03', 'ABEMACILIB X 150 MILIGRAMOS', '1250000', '1800000'
         ];
         const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-        ws['!cols'] = [{ wch: 20 }, { wch: 50 }];
+        ws['!cols'] = [{ wch: 20 }, { wch: 50 }, { wch: 20 }, { wch: 20 }];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Medicamentos");
         XLSX.writeFile(wb, "Plantilla_Medicamentos.xlsx");
@@ -234,9 +253,9 @@ export default function MedicamentosList({
                 };
 
                 const idxAtc = getColIdx('ATC', ['CODIGO']);
-                // Buscamos estrictamente DESCRIPCION_ATC o MEDICAMENTO. 
-                // Evitamos explícitamente cualquier columna que diga "COMERCIAL" o "PRODUCTO".
                 const idxDesc = getColIdx('DESCRIPCION_ATC', ['MEDICAMENTO', 'GENERICO'], true);
+                const idxPrecioC = getColIdx('PRECIO_COMPRA', ['COMPRA', 'COSTO', 'P_COMPRA', 'PRECIO_COMPRA']);
+                const idxPrecioV = getColIdx('PRECIO_VENTA', ['VENTA', 'P_VENTA', 'PRECIO_VENTA']);
 
                 if (idxAtc === -1 || idxDesc === -1) {
                     console.log("Headers detectados:", headers);
@@ -262,7 +281,9 @@ export default function MedicamentosList({
                         diasAdministracion: 0,
                         diasDescanso: 0,
                         total: 0,
-                        frecuenciaEntrega: 0
+                        frecuenciaEntrega: 0,
+                        precioCompra: idxPrecioC !== -1 ? Number(row[idxPrecioC]) || 0 : 0,
+                        precioVenta: idxPrecioV !== -1 ? Number(row[idxPrecioV]) || 0 : 0
                     };
 
                     // Verificar si ya existe (con checks defensivos)
@@ -430,6 +451,8 @@ export default function MedicamentosList({
                                     { key: 'atc', label: 'Código ATC', align: 'center' },
                                     { key: 'medicamento', label: 'Medicamento' },
                                     { key: 'presentacionComercial', label: 'Presentación', align: 'center' },
+                                    { key: 'precioCompra', label: 'P. Compra', align: 'right' },
+                                    { key: 'precioVenta', label: 'P. Venta', align: 'right' },
                                     { key: 'dosisEstandar', label: 'Dosis Estándar' },
                                     { key: 'diasAdministracion', label: 'Días Adm.', align: 'center' },
                                     { key: 'diasDescanso', label: 'Días Desc.', align: 'center' },
@@ -485,6 +508,12 @@ export default function MedicamentosList({
                                             {m.medicamento}
                                         </td>
                                         <td style={{ textAlign: 'center' }}>{m.presentacionComercial}</td>
+                                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                            {formatCurrency(m.precioCompra)}
+                                        </td>
+                                        <td style={{ textAlign: 'right', fontWeight: 600, color: '#16a34a' }}>
+                                            {formatCurrency(m.precioVenta)}
+                                        </td>
                                         <td style={{ color: 'var(--primary)', fontWeight: 600, fontSize: 13 }}>{m.dosisEstandar}</td>
                                         <td style={{ textAlign: 'center' }}>{m.diasAdministracion}</td>
                                         <td style={{ textAlign: 'center' }}>{m.diasDescanso}</td>

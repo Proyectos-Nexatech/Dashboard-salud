@@ -17,7 +17,9 @@ const INITIAL_FORM: MedicamentoInfo = {
     diasAdministracion: 0,
     diasDescanso: 0,
     total: 0,
-    frecuenciaEntrega: 0
+    frecuenciaEntrega: 0,
+    precioCompra: 0,
+    precioVenta: 0
 };
 
 export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicamento }: MedicamentoFormModalProps) {
@@ -27,7 +29,10 @@ export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicame
 
     useEffect(() => {
         if (medicamento) {
-            setForm({ ...medicamento });
+            setForm({
+                ...INITIAL_FORM,
+                ...medicamento
+            });
         } else {
             setForm(INITIAL_FORM);
         }
@@ -85,7 +90,7 @@ export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicame
                     <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: 'var(--text-main)' }}>
                         {medicamento ? 'Editar Medicamento' : 'Nuevo Medicamento'}
                     </h3>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-500)', padding: 4 }}>
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-400)', padding: 4 }}>
                         <X size={20} />
                     </button>
                 </div>
@@ -147,6 +152,36 @@ export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicame
                                     value={form.dosisEstandar}
                                     onChange={e => handleChange('dosisEstandar', e.target.value)}
                                     placeholder="Ej: 300 MG X 30 DIAS"
+                                />
+                            </div>
+                        </div>
+
+                        {/* Precios */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', marginBottom: 8 }}>
+                                    Precio de Compra (COP)
+                                </label>
+                                <input
+                                    type="number"
+                                    className="header-search"
+                                    style={{ width: '100%' }}
+                                    value={form.precioCompra}
+                                    onChange={e => handleChange('precioCompra', Number(e.target.value))}
+                                    placeholder="$ 0"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', marginBottom: 8 }}>
+                                    Precio de Venta (COP)
+                                </label>
+                                <input
+                                    type="number"
+                                    className="header-search"
+                                    style={{ width: '100%' }}
+                                    value={form.precioVenta}
+                                    onChange={e => handleChange('precioVenta', Number(e.target.value))}
+                                    placeholder="$ 0"
                                 />
                             </div>
                         </div>

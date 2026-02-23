@@ -50,6 +50,7 @@ export interface Paciente {
         noviembre?: string;
         diciembre?: string;
     };
+    tipoPaciente?: 'MONOTERAPIA' | 'HIBRIDO' | 'QUIMITERAPIA';
 }
 // ... (rest of the file content needs to be carefully handled to avoid deleting mock data)
 // Actually, it's safer to do multiple small replaces.

@@ -48,6 +48,7 @@ function toFirestoreDoc(p: Paciente): Record<string, any> {
         diasAdministracion: p.diasAdministracion || 0,
         diasDescanso: p.diasDescanso || 0,
         entregas: p.entregas || {},
+        tipoPaciente: p.tipoPaciente || '',
         _nombreNorm: normalize(p.nombreCompleto), // For search indexing
         _updatedAt: new Date().toISOString()
     };
@@ -80,6 +81,7 @@ function fromFirestoreDoc(data: Record<string, any>): Paciente {
         diasAdministracion: data.diasAdministracion || 0,
         diasDescanso: data.diasDescanso || 0,
         entregas: data.entregas || {},
+        tipoPaciente: data.tipoPaciente || undefined,
     } as Paciente;
 }
 
@@ -173,6 +175,7 @@ export async function syncExcelData(
             eps: newP.eps || existingP.eps,
             entidad: newP.entidad || existingP.entidad,
             entregas: { ...existingP.entregas, ...newP.entregas },
+            tipoPaciente: newP.tipoPaciente || existingP.tipoPaciente,
         } : newP;
 
         operations.push({ docId, data: toFirestoreDoc(merged) });

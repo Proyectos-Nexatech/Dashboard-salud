@@ -41,17 +41,18 @@ export async function addMedicamento(m: MedicamentoInfo): Promise<void> {
 
 export async function updateMedicamento(m: MedicamentoInfo, originalName?: string): Promise<void> {
     const docId = originalName ? sanitizeDocId(originalName) : sanitizeDocId(m.medicamento);
+    console.log('Firestore updateMedicamento:', { docId, originalName, data: m });
 
     if (originalName && normalize(originalName) !== normalize(m.medicamento)) {
-        // Name changed, delete old and create new
+        console.log('Name changed, moving document...');
         await deleteDoc(doc(db, MEDICAMENTOS_COLLECTION, docId));
-        const newDocId = normalize(m.medicamento).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
+        const newDocId = sanitizeDocId(m.medicamento);
         await setDoc(doc(db, MEDICAMENTOS_COLLECTION, newDocId), m);
     } else {
         const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
         await setDoc(ref, m, { merge: true });
     }
-    console.log(`✅ Medicamento actualizado: ${m.medicamento}`);
+    console.log(`✅ Medicamento actualizado en Firestore: ${m.medicamento}`);
 }
 
 export async function deleteMedicamento(name: string): Promise<void> {

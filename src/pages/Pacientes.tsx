@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Search, Download, Eye, X, Plus, Pencil, Trash2, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Download, Eye, X, Plus, Pencil, Trash2, ChevronDown, ChevronLeft, ChevronRight, Filter, Activity, Users } from 'lucide-react';
 import type { Paciente } from '../data/mockData';
 import { getEstadoBadge } from '../data/mockData';
 import * as XLSX from 'xlsx';
@@ -18,6 +18,7 @@ interface PacientesProps {
 export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDeletePatient, onDeleteBatch, epsList }: PacientesProps) {
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('');
+    const [filterTipo, setFilterTipo] = useState('');
     const [selectedPatient, setSelectedPatient] = useState<Paciente | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
@@ -45,7 +46,8 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                 (p.medicamento && p.medicamento.toLowerCase().includes(searchTerm));
 
             const matchEstado = !filterEstado || p.estado === filterEstado;
-            return matchSearch && matchEstado;
+            const matchTipo = !filterTipo || p.tipoPaciente === filterTipo;
+            return matchSearch && matchEstado && matchTipo;
         });
 
         if (sortCol) {
@@ -68,7 +70,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
         }
 
         return filtered;
-    }, [pacientes, search, filterEstado, sortCol, sortDir]);
+    }, [pacientes, search, filterEstado, filterTipo, sortCol, sortDir]);
 
     const paginated = useMemo(() => {
         return filteredAndSorted.slice((page - 1) * itemsPerPage, page * itemsPerPage);
@@ -79,7 +81,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
     // Reset to page 1 when data changes
     useEffect(() => {
         setPage(1);
-    }, [search, filterEstado, itemsPerPage]);
+    }, [search, filterEstado, filterTipo, itemsPerPage]);
 
     const handleSort = (col: string) => {
         if (sortCol === col) {
@@ -176,6 +178,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
             'Medicamento': p.medicamento,
             'Dosis': p.dosisEstandar,
             'Estado Actual': getEstadoBadge(p.estado).label,
+            'Tipo de Paciente': p.tipoPaciente || 'N/A',
             'Total Entregas (Año)': Object.keys(p.entregas).length
         }));
 
@@ -206,34 +209,83 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
             {/* Search & Filter Toolbar */}
             <div className="card" style={{ marginBottom: 24, padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, flex: 1 }}>
-                    <div className="header-search" style={{ width: 320, background: 'var(--bg-body)' }}>
-                        <Search size={18} color="var(--text-secondary)" />
+                    {/* Input de Búsqueda */}
+                    <div className="header-search" style={{
+                        width: 320, background: 'var(--bg-body)', border: search ? '1.5px solid var(--primary)' : '1.5px solid var(--gray-200)',
+                        transition: 'all 0.2s', boxShadow: search ? '0 0 0 3px var(--primary-light)' : 'none'
+                    }}>
+                        <Search size={18} color={search ? 'var(--primary)' : 'var(--text-secondary)'} />
                         <input
                             type="text"
-                            placeholder="Buscar paciente..."
+                            placeholder="Buscar paciente por nombre o ID..."
                             value={search}
                             onChange={e => { setSearch(e.target.value); setPage(1); }}
-                            style={{ background: 'transparent' }}
+                            style={{ background: 'transparent', fontWeight: 500 }}
                         />
+                        {search && (
+                            <button onClick={() => setSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray-400)', display: 'flex' }}>
+                                <X size={14} />
+                            </button>
+                        )}
                     </div>
 
-                    <select
-                        className="header-search"
-                        style={{ width: 200, appearance: 'none', background: 'var(--bg-body)', cursor: 'pointer' }}
-                        value={filterEstado}
-                        onChange={e => { setFilterEstado(e.target.value); setPage(1); }}
-                    >
-                        <option value="">Todos los estados</option>
-                        <option value="AC ONC">Activo Oral</option>
-                        <option value="ACT ONC QXT">Activo + QXT</option>
-                        <option value="ACT NO ONC">Activo No Onc.</option>
-                        <option value="IN S">Suspendido</option>
-                        <option value="IN ST">Inactivo Temporal</option>
-                        <option value="IN F">Fallecido</option>
-                        <option value="IN EPS">Cambio EPS</option>
-                        <option value="IN C">Inactivo</option>
-                        <option value="IN R">Cambio Residencia</option>
-                    </select>
+                    {/* Filtro de Estado */}
+                    <div style={{ position: 'relative', width: 220 }}>
+                        <div className="header-search" style={{
+                            width: '100%', background: 'var(--bg-body)',
+                            border: filterEstado ? '1.5px solid var(--primary)' : '1.5px solid var(--gray-200)',
+                            paddingRight: 35, transition: 'all 0.2s'
+                        }}>
+                            <Activity size={18} color={filterEstado ? 'var(--primary)' : 'var(--text-secondary)'} />
+                            <select
+                                style={{
+                                    appearance: 'none', background: 'transparent', border: 'none',
+                                    width: '100%', cursor: 'pointer', outline: 'none',
+                                    fontSize: 14, fontWeight: 500, color: filterEstado ? 'var(--text-main)' : 'var(--text-secondary)'
+                                }}
+                                value={filterEstado}
+                                onChange={e => { setFilterEstado(e.target.value); setPage(1); }}
+                            >
+                                <option value="">Estado: Todos</option>
+                                <option value="AC ONC">Activo Oral</option>
+                                <option value="ACT ONC QXT">Activo + QXT</option>
+                                <option value="ACT NO ONC">Activo No Onc.</option>
+                                <option value="IN S">Suspendido</option>
+                                <option value="IN ST">Inactivo Temporal</option>
+                                <option value="IN F">Fallecido</option>
+                                <option value="IN EPS">Cambio EPS</option>
+                                <option value="IN C">Inactivo</option>
+                                <option value="IN R">Cambio Residencia</option>
+                            </select>
+                        </div>
+                        <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--gray-400)' }} />
+                    </div>
+
+                    {/* Filtro de Tipo */}
+                    <div style={{ position: 'relative', width: 200 }}>
+                        <div className="header-search" style={{
+                            width: '100%', background: 'var(--bg-body)',
+                            border: filterTipo ? '1.5px solid var(--primary)' : '1.5px solid var(--gray-200)',
+                            paddingRight: 35, transition: 'all 0.2s'
+                        }}>
+                            <Users size={18} color={filterTipo ? 'var(--primary)' : 'var(--text-secondary)'} />
+                            <select
+                                style={{
+                                    appearance: 'none', background: 'transparent', border: 'none',
+                                    width: '100%', cursor: 'pointer', outline: 'none',
+                                    fontSize: 14, fontWeight: 500, color: filterTipo ? 'var(--text-main)' : 'var(--text-secondary)'
+                                }}
+                                value={filterTipo}
+                                onChange={e => { setFilterTipo(e.target.value); setPage(1); }}
+                            >
+                                <option value="">Tipo: Todos</option>
+                                <option value="MONOTERAPIA">MONOTERAPIA</option>
+                                <option value="HIBRIDO">HIBRIDO</option>
+                                <option value="QUIMITERAPIA">QUIMITERAPIA</option>
+                            </select>
+                        </div>
+                        <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--gray-400)' }} />
+                    </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginRight: 'auto', marginLeft: 16 }}>
@@ -336,6 +388,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                 { key: 'nombreCompleto', label: 'Paciente' },
                                 { key: 'eps', label: 'EPS / Municipio' },
                                 { key: 'medicamento', label: 'Medicamento' },
+                                { key: 'tipoPaciente', label: 'Tipo Paciente' },
                                 { key: 'estado', label: 'Estado' },
                                 { key: 'entregas', label: 'Entregas Año' },
                             ] as { key: string; label: string }[]).map(col => (
@@ -399,6 +452,9 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                     <td>
                                         <div style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.medicamento}</div>
                                         <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{p.dosisEstandar}</div>
+                                    </td>
+                                    <td>
+                                        <div style={{ fontWeight: 600, fontSize: 13 }}>{p.tipoPaciente || '-'}</div>
                                     </td>
                                     <td>
                                         <span className={`badge ${badge.badgeClass}`}>{badge.label}</span>
@@ -575,6 +631,10 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
                                             <span style={{ color: 'var(--text-secondary)' }}>EPS</span>
                                             <span style={{ fontWeight: 500, textAlign: 'right', maxWidth: '70%' }}>{selectedPatient.eps}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
+                                            <span style={{ color: 'var(--text-secondary)' }}>Tipo Paciente</span>
+                                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedPatient.tipoPaciente || 'No definido'}</span>
                                         </div>
                                     </div>
                                 </div>

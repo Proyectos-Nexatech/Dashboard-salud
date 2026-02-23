@@ -18,7 +18,8 @@ const initialPaciente: Omit<Paciente, 'id'> = {
     fechaNacimiento: '', edad: 0, sexo: undefined,
     estado: 'AC ONC' as EstadoCode,
     medicamento: '', presentacionComercial: '', dosisEstandar: '',
-    diasAdministracion: 30, diasDescanso: 0, entregas: {}
+    diasAdministracion: 30, diasDescanso: 0, entregas: {},
+    tipoPaciente: undefined
 };
 
 export default function PacienteFormModal({ isOpen, onClose, onSave, paciente, epsList }: PacienteFormModalProps) {
@@ -288,6 +289,15 @@ export default function PacienteFormModal({ isOpen, onClose, onSave, paciente, e
                         <div>
                             <label style={labelStyle}>Días Descanso</label>
                             <input type="number" style={{ ...fieldStyle('diasDescanso'), background: 'var(--gray-50)' }} value={form.diasDescanso || 0} readOnly />
+                        </div>
+                        <div style={{ gridColumn: '1 / -1' }}>
+                            <label style={labelStyle}>Tipo de Paciente</label>
+                            <select style={fieldStyle('tipoPaciente')} value={form.tipoPaciente || ''} onChange={e => handleChange('tipoPaciente', e.target.value)}>
+                                <option value="">Seleccionar tipo...</option>
+                                <option value="MONOTERAPIA">MONOTERAPIA</option>
+                                <option value="HIBRIDO">HIBRIDO</option>
+                                <option value="QUIMITERAPIA">QUIMITERAPIA</option>
+                            </select>
                         </div>
                     </div>
 
