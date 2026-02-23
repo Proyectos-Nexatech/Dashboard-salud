@@ -18,8 +18,10 @@ import type { Despacho } from './data/despachoTypes';
 import type { MedicamentoInfo } from './data/medicamentosData';
 import Entidades from './pages/Entidades';
 import LoginPage from './pages/LoginPage';
+import Configuracion from './pages/Configuracion';
 import { useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
+import { subscribeToUsers, seedInitialUsers } from './services/userService';
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     dashboard: { title: 'Dashboard', subtitle: 'Resumen ejecutivo de la cadena de suministro oncológico' },
@@ -107,11 +109,18 @@ export default function App() {
             setDespachos(data);
         });
 
+        const unsubUsers = subscribeToUsers((data) => {
+            if (data.length === 0) {
+                seedInitialUsers().catch(console.error);
+            }
+        });
+
         return () => {
             unsubPatients();
             unsubMeds();
             unsubEntidades();
             unsubDespachos();
+            unsubUsers();
             clearTimeout(timeout);
         };
     }, []);
@@ -197,6 +206,8 @@ export default function App() {
                         onRefresh={() => console.log('Despachos refreshed')}
                     />
                 );
+            case 'configuracion':
+                return <Configuracion />;
             default:
                 return (
                     <div className="card" style={{ textAlign: 'center', padding: 60 }}>
