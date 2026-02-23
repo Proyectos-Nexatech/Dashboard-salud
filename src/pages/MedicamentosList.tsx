@@ -5,6 +5,7 @@ import ConfirmModal from '../components/ConfirmModal';
 import MedicamentoFormModal from '../components/MedicamentoFormModal';
 import * as XLSX from 'xlsx';
 
+
 interface MedicamentosProps {
     medicamentos: MedicamentoInfo[];
     onAddMed?: (m: MedicamentoInfo) => Promise<void>;
@@ -24,6 +25,7 @@ export default function MedicamentosList({
     const [showUploadModal, setShowUploadModal] = useState(false);
     const [uploadStatus, setUploadStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [uploadMsg, setUploadMsg] = useState('');
+    const [uploadProgress, setUploadProgress] = useState(0);
     const [page, setPage] = useState(1);
 
     // Sorting and Pagination state
@@ -37,6 +39,7 @@ export default function MedicamentosList({
     const [deletingMed, setDeletingMed] = useState<MedicamentoInfo | null>(null);
     const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set());
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
 
     const filteredAndSorted = useMemo(() => {
@@ -150,21 +153,41 @@ export default function MedicamentosList({
         }
     };
 
+    const handleClearIncomplete = async () => {
+        if (!onDeleteBatch) return;
+
+        const medsToDelete = medicamentos.filter(m =>
+            (Number(m.presentacionComercial) === 0 || !m.presentacionComercial) &&
+            (!m.dosisEstandar || m.dosisEstandar.trim() === '')
+        ).map(m => m.medicamento);
+
+        if (medsToDelete.length === 0) {
+            alert('No hay medicamentos incompletos para borrar.');
+            setShowClearConfirm(false);
+            return;
+        }
+
+        setActionLoading(true);
+        try {
+            await onDeleteBatch(medsToDelete);
+            setShowClearConfirm(false);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const downloadTemplate = () => {
         const headers = [
-            'MEDICAMENTO',
-            'PRESENTACION COMERCIAL',
-            'DOSIS ESTANDAR',
-            'DIAS DE ADMINSTRACION',
-            'DIAS DE DESCANSO',
-            'TOTAL',
-            'FRECUENCIA DE ENTREGA'
+            'ATC',
+            'DESCRIPCION_ATC'
         ];
         const example = [
-            'EJEMPLO: ABEMACILIB X 150 MG', 60, '300 MG X 30 DIAS', 30, 0, 30, 27
+            'L01EF03', 'ABEMACILIB X 150 MILIGRAMOS'
         ];
         const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-        ws['!cols'] = [{ wch: 40 }, { wch: 25 }, { wch: 25 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 25 }];
+        ws['!cols'] = [{ wch: 20 }, { wch: 50 }];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Medicamentos");
         XLSX.writeFile(wb, "Plantilla_Medicamentos.xlsx");
@@ -175,7 +198,8 @@ export default function MedicamentosList({
         if (!file) return;
 
         setUploadStatus('loading');
-        setUploadMsg('Procesando archivo...');
+        setUploadMsg('Preparando archivo...');
+        setUploadProgress(0);
 
         const reader = new FileReader();
         reader.onload = async (evt) => {
@@ -188,47 +212,90 @@ export default function MedicamentosList({
 
                 if (rows.length < 2) throw new Error("Archivo vacío o formato incorrecto");
 
-                const headers = rows[0].map((h: any) => String(h || '').toUpperCase().trim());
-                const getColIdx = (name: string, ...aliases: string[]) => {
-                    return headers.findIndex((h: string) => h.includes(name) || aliases.some(a => h.includes(a)));
+                const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().trim();
+                const headers = rows[0].map((h: any) => normalize(String(h || '')));
+
+                const getColIdx = (name: string, aliases: string[] = [], isDescription = false) => {
+                    const target = normalize(name);
+                    const alts = aliases.map(normalize);
+
+                    // 1. Prioridad: Coincidencia exacta
+                    const exactIdx = headers.findIndex((h: string) => {
+                        if (isDescription && (h.includes('COMERCIAL') || h.includes('PRODUCTO') || h.includes('MARCA'))) return false;
+                        return h === target || alts.some(a => h === a);
+                    });
+                    if (exactIdx !== -1) return exactIdx;
+
+                    // 2. Coincidencia parcial
+                    return headers.findIndex((h: string) => {
+                        if (isDescription && (h.includes('COMERCIAL') || h.includes('PRODUCTO') || h.includes('MARCA'))) return false;
+                        return h.includes(target) || alts.some(a => h.includes(a));
+                    });
                 };
 
-                const idxMed = getColIdx('MEDICAMENTO');
-                const idxPres = getColIdx('PRESENTACION', 'COMERCIAL');
-                const idxDosis = getColIdx('DOSIS', 'ESTANDAR');
-                const idxDiasAdm = getColIdx('ADMIN', 'ADMINISTRACION');
-                const idxDiasDes = getColIdx('DESCANSO');
-                const idxTotal = getColIdx('TOTAL');
-                const idxFrec = getColIdx('FRECUENCIA', 'ENTREGA');
+                const idxAtc = getColIdx('ATC', ['CODIGO']);
+                // Buscamos estrictamente DESCRIPCION_ATC o MEDICAMENTO. 
+                // Evitamos explícitamente cualquier columna que diga "COMERCIAL" o "PRODUCTO".
+                const idxDesc = getColIdx('DESCRIPCION_ATC', ['MEDICAMENTO', 'GENERICO'], true);
 
-                if (idxMed === -1) throw new Error("No se encontró la columna 'MEDICAMENTO'");
+                if (idxAtc === -1 || idxDesc === -1) {
+                    console.log("Headers detectados:", headers);
+                    throw new Error("No se encontraron las columnas necesarias (ATC y DESCRIPCIÓN_ATC)");
+                }
 
-                const addedCount = 0;
+                let totalAdded = 0;
+                let totalSkipped = 0;
+                const totalRows = rows.length - 1;
+
                 for (let i = 1; i < rows.length; i++) {
                     const row = rows[i];
-                    if (!row[idxMed]) continue;
+                    if (!row[idxAtc] || !row[idxDesc]) {
+                        totalSkipped++;
+                        continue;
+                    }
 
                     const m: MedicamentoInfo = {
-                        medicamento: String(row[idxMed]).toUpperCase(),
-                        presentacionComercial: Number(row[idxPres]) || 0,
-                        dosisEstandar: String(row[idxDosis] || ''),
-                        diasAdministracion: Number(row[idxDiasAdm]) || 0,
-                        diasDescanso: Number(row[idxDiasDes]) || 0,
-                        total: Number(row[idxTotal]) || 0,
-                        frecuenciaEntrega: Number(row[idxFrec]) || 0
+                        atc: String(row[idxAtc]).toUpperCase().trim(),
+                        medicamento: String(row[idxDesc]).toUpperCase().trim(),
+                        presentacionComercial: 0,
+                        dosisEstandar: '',
+                        diasAdministracion: 0,
+                        diasDescanso: 0,
+                        total: 0,
+                        frecuenciaEntrega: 0
                     };
 
-                    if (onAddMed) {
-                        await onAddMed(m);
+                    // Verificar si ya existe (con checks defensivos)
+                    const exists = medicamentos.some(existing => {
+                        const existingAtc = (existing.atc || '').toUpperCase().trim();
+                        const existingMed = (existing.medicamento || '').toUpperCase().trim();
+                        return existingAtc === m.atc && existingMed === m.medicamento;
+                    });
+
+                    if (exists) {
+                        totalSkipped++;
+                    } else if (onAddMed) {
+                        try {
+                            await onAddMed(m);
+                            totalAdded++;
+                        } catch (e) {
+                            console.error("Error al agregar fila ", i, e);
+                            totalSkipped++;
+                        }
+                    } else {
+                        totalSkipped++;
                     }
+
+                    setUploadProgress(Math.round((i / totalRows) * 100));
                 }
 
                 setUploadStatus('success');
-                setUploadMsg('Medicamentos importados correctamente.');
+                setUploadMsg(`Proceso completado: ${totalAdded} nuevos, ${totalSkipped} saltados (duplicados o incompletos).`);
                 setTimeout(() => {
                     setShowUploadModal(false);
                     setUploadStatus('idle');
-                }, 2000);
+                    setUploadProgress(0);
+                }, 4000);
 
             } catch (err: any) {
                 console.error(err);
@@ -295,6 +362,14 @@ export default function MedicamentosList({
                         <Upload size={16} />
                         Cargar Excel
                     </button>
+                    <button
+                        className="btn-primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 30, background: '#fef2f2', color: '#dc2626', border: '1.5px solid #fecaca' }}
+                        onClick={() => setShowClearConfirm(true)}
+                    >
+                        <Trash2 size={16} />
+                        Limpiar Lista
+                    </button>
                 </div>
             </div>
 
@@ -352,6 +427,7 @@ export default function MedicamentosList({
                                     />
                                 </th>
                                 {([
+                                    { key: 'atc', label: 'Código ATC', align: 'center' },
                                     { key: 'medicamento', label: 'Medicamento' },
                                     { key: 'presentacionComercial', label: 'Presentación', align: 'center' },
                                     { key: 'dosisEstandar', label: 'Dosis Estándar' },
@@ -392,6 +468,18 @@ export default function MedicamentosList({
                                                 onChange={() => toggleSelect(m.medicamento)}
                                                 style={{ width: 16, height: 16, cursor: 'pointer', accentColor: 'var(--primary)' }}
                                             />
+                                        </td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            <span style={{
+                                                background: 'var(--gray-100)',
+                                                padding: '4px 8px',
+                                                borderRadius: 6,
+                                                fontWeight: 700,
+                                                fontSize: 11,
+                                                color: 'var(--gray-700)'
+                                            }}>
+                                                {m.atc || 'N/A'}
+                                            </span>
                                         </td>
                                         <td style={{ fontWeight: 600, color: 'var(--text-main)', fontSize: 13 }}>
                                             {m.medicamento}
@@ -506,6 +594,16 @@ export default function MedicamentosList({
                 type="danger"
             />
 
+            <ConfirmModal
+                isOpen={showClearConfirm}
+                onClose={() => setShowClearConfirm(false)}
+                onConfirm={handleClearIncomplete}
+                title="Limpiar Listado"
+                message="Se eliminarán todos los medicamentos que NO tengan datos de Presentación ni Dosis Estándar. ¿Deseas continuar?"
+                confirmText={actionLoading ? 'Limpiando...' : 'Sí, Limpiar'}
+                type="danger"
+            />
+
             {showUploadModal && (
                 <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(4px)', paddingTop: '100px' }}>
                     <div className="card fade-in" style={{ width: 500, padding: 24, position: 'relative', borderRadius: 24, height: 'auto', minHeight: 'unset' }}>
@@ -525,9 +623,17 @@ export default function MedicamentosList({
                             <div style={{ background: 'var(--bg-body)', padding: 16, borderRadius: 16, border: '1px dashed var(--gray-300)' }}>
                                 <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>2. Sube el archivo completado.</p>
                                 {uploadStatus === 'loading' ? (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <div className="animate-spin" style={{ width: 16, height: 16, border: '2px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%' }}></div>
-                                        <span style={{ fontSize: 13 }}>Procesando...</span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <div className="animate-spin" style={{ width: 16, height: 16, border: '2px solid var(--primary)', borderTopColor: 'transparent', borderRadius: '50%' }}></div>
+                                                <span style={{ fontSize: 13, fontWeight: 600 }}>Procesando...</span>
+                                            </div>
+                                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--primary)' }}>{uploadProgress}%</span>
+                                        </div>
+                                        <div style={{ width: '100%', height: 8, background: 'var(--gray-200)', borderRadius: 10, overflow: 'hidden' }}>
+                                            <div style={{ height: '100%', width: `${uploadProgress}%`, background: 'var(--primary)', transition: 'width 0.3s ease' }}></div>
+                                        </div>
                                     </div>
                                 ) : (
                                     <input type="file" onChange={handleFileUpload} accept=".xlsx, .xls" style={{ fontSize: 13, width: '100%' }} />

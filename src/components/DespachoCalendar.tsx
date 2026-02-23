@@ -9,7 +9,7 @@ import { formatFechaEntrega, esEntregaUrgente, esEntregaVencida } from '../utils
 interface DespachoCalendarProps {
     despachos: Despacho[];
     onClose: () => void;
-    onConfirm: (despachoId: string, observaciones: string) => Promise<void>;
+    onConfirm: (despachoId: string, observaciones: string, fechaConfirmacion?: string) => Promise<void>;
     onUpdateStatus: (id: string, estado: Despacho['estadoActual'], motivo: string, nuevaFecha?: string) => Promise<void>;
 }
 
@@ -23,8 +23,9 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
     const [observaciones, setObservaciones] = useState('');
     const [viewMode, setViewMode] = useState<ViewMode>('Mes');
     const [showViewDropdown, setShowViewDropdown] = useState(false);
-    const [actionType, setActionType] = useState<'Confirmar' | 'Cancelar' | 'Posponer' | 'Suspender'>('Confirmar');
+    const [actionType, setActionType] = useState<'Agendar' | 'Entregar' | 'Cancelar' | 'Posponer'>('Agendar');
     const [actionValue, setActionValue] = useState('');
+    const [actionDate, setActionDate] = useState('');
 
     const meses = [
         'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -93,10 +94,10 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
     };
 
     const getDespachoColor = (d: Despacho) => {
-        const estado = d.estadoActual || (d.confirmado ? 'Confirmado' : 'Pendiente');
-        if (estado === 'Confirmado') return '#16a34a';
+        const estado = d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente');
+        if (estado === 'Entregado') return '#16a34a';
+        if (estado === 'Agendado') return '#0369a1';
         if (estado === 'Cancelado') return '#dc2626';
-        if (estado === 'Suspendido') return '#db2777'; // Rosado
         if (estado === 'Pospuesto') return '#b45309';  // Ámbar/Amarillo
 
         if (esEntregaVencida(d)) return '#dc2626';
@@ -333,12 +334,12 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                         <div style={{ borderTop: `1px solid ${G_COLORS.border}`, paddingTop: 16 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', fontSize: 14 }}><Filter size={16} /> <span style={{ fontWeight: 500 }}>Filtros de Entrega</span></div>
                             <div style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                <LegendItem color="#16a34a" label="Confirmados" />
+                                <LegendItem color="#16a34a" label="Entregados" />
+                                <LegendItem color="#0369a1" label="Agendados" />
                                 <LegendItem color="#1a73e8" label="Pendientes" />
                                 <LegendItem color="#f59e0b" label="Urgentes" />
-                                <LegendItem color="#dc2626" label="Vencidos / Cancelados" />
                                 <LegendItem color="#b45309" label="Pospuestos" />
-                                <LegendItem color="#db2777" label="Suspendidos" />
+                                <LegendItem color="#dc2626" label="Vencidos / Cancelados" />
                             </div>
                         </div>
                     </aside>
@@ -363,36 +364,56 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                 <InfoItem icon={<Building2 size={18} />} value={selectedDespacho.eps} />
                                 <InfoItem icon={<MapPin size={18} />} value={selectedDespacho.municipio} />
                             </div>
-                            {(!selectedDespacho.confirmado && selectedDespacho.estadoActual !== 'Cancelado') && (
+                            {(!(selectedDespacho.confirmado || selectedDespacho.estadoActual === 'Entregado') && selectedDespacho.estadoActual !== 'Cancelado') && (
                                 <div style={{ marginTop: 24, borderTop: `1px solid #eee`, paddingTop: 20 }}>
                                     <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                                        {(['Confirmar', 'Cancelar', 'Posponer', 'Suspender'] as const).map(t => (
-                                            <button
-                                                key={t}
-                                                onClick={() => { setActionType(t); setActionValue(''); }}
-                                                style={{
-                                                    flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: 700, borderRadius: 6,
-                                                    border: 'none',
-                                                    background: actionType === t ? (t === 'Confirmar' ? '#16a34a' : t === 'Cancelar' ? '#dc2626' : t === 'Posponer' ? '#2563eb' : '#4b5563') : '#f1f3f4',
-                                                    color: actionType === t ? 'white' : '#5f6368',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s'
-                                                }}
-                                            >
-                                                {t}
-                                            </button>
-                                        ))}
+                                        {(() => {
+                                            const estado = selectedDespacho.estadoActual || (selectedDespacho.confirmado ? 'Entregado' : 'Pendiente');
+                                            const availableActions: Array<'Agendar' | 'Entregar' | 'Cancelar' | 'Posponer'> = [];
+
+                                            if (estado === 'Pendiente') {
+                                                availableActions.push('Agendar');
+                                            } else if (estado === 'Agendado' || estado === 'Pospuesto') {
+                                                availableActions.push('Entregar', 'Posponer', 'Cancelar');
+                                            }
+
+                                            return availableActions.map(t => (
+                                                <button
+                                                    key={t}
+                                                    onClick={() => {
+                                                        setActionType(t);
+                                                        setActionValue('');
+                                                        const today = new Date().toISOString().split('T')[0];
+                                                        setActionDate(t === 'Posponer' ? selectedDespacho.fechaProgramada : today);
+                                                    }}
+                                                    style={{
+                                                        flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: 700, borderRadius: 6,
+                                                        border: 'none',
+                                                        background: actionType === t ? (t === 'Entregar' ? '#16a34a' : t === 'Cancelar' ? '#dc2626' : t === 'Posponer' ? '#2563eb' : '#0369a1') : '#f1f3f4',
+                                                        color: actionType === t ? 'white' : '#5f6368',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s'
+                                                    }}
+                                                >
+                                                    {t}
+                                                </button>
+                                            ));
+                                        })()}
                                     </div>
 
-                                    {actionType === 'Posponer' ? (
+                                    {(actionType === 'Posponer' || actionType === 'Entregar' || actionType === 'Agendar') && (
+                                        <div style={{ marginBottom: 16 }}>
+                                            <label style={{ fontSize: 12, fontWeight: 600, color: G_COLORS.text, display: 'block', marginBottom: 8 }}>
+                                                Fecha de {actionType === 'Entregar' ? 'Entrega' : actionType === 'Agendar' ? 'Agendamiento' : 'Reprogramación'}
+                                            </label>
+                                            <input type="date" value={actionDate} onChange={e => setActionDate(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid #dadce0', fontSize: 13, outline: 'none' }} />
+                                        </div>
+                                    )}
+
+                                    {(actionType === 'Entregar' || actionType === 'Agendar') ? (
                                         <>
-                                            <label style={{ fontSize: 12, fontWeight: 600, color: G_COLORS.text, display: 'block', marginBottom: 8 }}>Nueva fecha de entrega</label>
-                                            <input type="date" value={actionValue} onChange={e => setActionValue(e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1px solid #dadce0', fontSize: 13, marginBottom: 16, outline: 'none' }} />
-                                        </>
-                                    ) : actionType === 'Confirmar' ? (
-                                        <>
-                                            <label style={{ fontSize: 12, fontWeight: 600, color: G_COLORS.text, display: 'block', marginBottom: 8 }}>Observaciones de entrega</label>
-                                            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Eje: Entregado a familiar..." style={{ width: '100%', minHeight: 60, padding: 12, borderRadius: 8, border: '1px solid #dadce0', fontSize: 13, resize: 'none', marginBottom: 16, fontFamily: 'inherit' }} />
+                                            <label style={{ fontSize: 12, fontWeight: 600, color: G_COLORS.text, display: 'block', marginBottom: 8 }}>{actionType === 'Entregar' ? 'Observaciones de entrega' : 'Notas de agendamiento'}</label>
+                                            <textarea value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder={actionType === 'Entregar' ? "Eje: Entregado a familiar..." : "Notas opcionales..."} style={{ width: '100%', minHeight: 60, padding: 12, borderRadius: 8, border: '1px solid #dadce0', fontSize: 13, resize: 'none', marginBottom: 16, fontFamily: 'inherit' }} />
                                         </>
                                     ) : (
                                         <>
@@ -428,10 +449,10 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                             if (!selectedDespacho) return;
                                             setConfirmando(true);
                                             try {
-                                                if (actionType === 'Confirmar') {
-                                                    await onConfirm(selectedDespacho.id, observaciones);
+                                                if (actionType === 'Entregar') {
+                                                    await onConfirm(selectedDespacho.id, observaciones, actionDate);
                                                 } else {
-                                                    await onUpdateStatus(selectedDespacho.id, actionType === 'Cancelar' ? 'Cancelado' : actionType === 'Posponer' ? 'Pospuesto' : 'Suspendido', actionValue, actionType === 'Posponer' ? actionValue : undefined);
+                                                    await onUpdateStatus(selectedDespacho.id, actionType === 'Agendar' ? 'Agendado' : actionType === 'Cancelar' ? 'Cancelado' : 'Pospuesto', actionValue, actionDate);
                                                 }
                                                 setSelectedDespacho(null);
                                                 setObservaciones('');
@@ -442,23 +463,23 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                                 setConfirmando(false);
                                             }
                                         }}
-                                        disabled={confirmando || (actionType !== 'Confirmar' && !actionValue)}
+                                        disabled={confirmando || (actionType !== 'Entregar' && actionType !== 'Agendar' && !actionValue)}
                                         style={{
                                             width: '100%', padding: '12px', borderRadius: 8,
-                                            background: actionType === 'Confirmar' ? '#16a34a' : actionType === 'Cancelar' ? '#dc2626' : actionType === 'Posponer' ? '#2563eb' : '#4b5563',
+                                            background: actionType === 'Entregar' ? '#16a34a' : actionType === 'Cancelar' ? '#dc2626' : actionType === 'Posponer' ? '#2563eb' : '#0369a1',
                                             color: 'white', border: 'none', fontWeight: 600, fontSize: 14, cursor: confirmando ? 'not-allowed' : 'pointer',
-                                            opacity: (confirmando || (actionType !== 'Confirmar' && !actionValue)) ? 0.7 : 1
+                                            opacity: (confirmando || (actionType !== 'Entregar' && actionType !== 'Agendar' && !actionValue)) ? 0.7 : 1
                                         }}
                                     >
                                         {confirmando ? 'Procesando...' : 'ACEPTAR Y GUARDAR'}
                                     </button>
                                 </div>
                             )}
-                            {(selectedDespacho.confirmado || selectedDespacho.estadoActual === 'Cancelado' || selectedDespacho.estadoActual === 'Suspendido') && (
+                            {(selectedDespacho.confirmado || selectedDespacho.estadoActual === 'Entregado' || selectedDespacho.estadoActual === 'Cancelado') && (
                                 <div style={{ marginTop: 20, padding: '12px 16px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                                     <div style={{ fontSize: 12, fontWeight: 700, color: G_COLORS.textLight, textTransform: 'uppercase', marginBottom: 4 }}>Estado Actual</div>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: selectedDespacho.estadoActual === 'Cancelado' ? '#dc2626' : selectedDespacho.estadoActual === 'Suspendido' ? '#4b5563' : '#16a34a' }}>
-                                        {selectedDespacho.estadoActual === 'Cancelado' ? '✕ Cancelado' : selectedDespacho.estadoActual === 'Suspendido' ? '⏸ Suspendido' : '✓ Confirmado'}
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: selectedDespacho.estadoActual === 'Cancelado' ? '#dc2626' : '#16a34a' }}>
+                                        {selectedDespacho.estadoActual === 'Cancelado' ? '✕ Cancelado' : '✓ Entregado'}
                                     </div>
                                     {selectedDespacho.motivo && <div style={{ fontSize: 13, color: G_COLORS.text, marginTop: 4, fontStyle: 'italic' }}>"{selectedDespacho.motivo}"</div>}
                                     {selectedDespacho.observaciones && <div style={{ fontSize: 13, color: G_COLORS.text, marginTop: 4 }}>Obs: {selectedDespacho.observaciones}</div>}

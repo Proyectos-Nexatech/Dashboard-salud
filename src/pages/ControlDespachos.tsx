@@ -22,28 +22,42 @@ import {
     actualizarEstadoDespacho,
 } from '../services/despachoService';
 import DespachoCalendar from '../components/DespachoCalendar';
+import type { MedicamentoInfo } from '../data/medicamentosData';
 
 interface ControlDespachosProps {
     pacientes: Paciente[];
+    medicamentos: MedicamentoInfo[];
     despachos: Despacho[];
     onRefresh?: () => void;
 }
 
-type FiltroEstado = 'todos' | 'pendientes' | 'confirmados' | 'vencidos' | 'urgentes' | 'cancelados' | 'pospuestos' | 'suspendidos';
+type FiltroEstado = 'todos' | 'pendientes' | 'agendados' | 'entregados' | 'vencidos' | 'urgentes' | 'cancelados' | 'pospuestos';
 
 // ─── Badge de estado ──────────────────────────────────────────────────────────
 
 function EstadoBadge({ despacho }: { despacho: Despacho }) {
-    const estado = despacho.estadoActual || (despacho.confirmado ? 'Confirmado' : 'Pendiente');
+    const estado = despacho.estadoActual || (despacho.confirmado ? 'Entregado' : 'Pendiente');
 
-    if (estado === 'Confirmado') {
+    if (estado === 'Entregado') {
         return (
             <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 background: '#dcfce7', color: '#15803d', padding: '3px 10px',
                 borderRadius: 20, fontSize: 11, fontWeight: 700
             }}>
-                <CheckCircle2 size={12} />Confirmado
+                <CheckCircle2 size={12} />Entregado
+            </span>
+        );
+    }
+
+    if (estado === 'Agendado') {
+        return (
+            <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: '#e0f2fe', color: '#0369a1', padding: '3px 10px',
+                borderRadius: 20, fontSize: 11, fontWeight: 700
+            }}>
+                <Calendar size={12} />Agendado
             </span>
         );
     }
@@ -56,18 +70,6 @@ function EstadoBadge({ despacho }: { despacho: Despacho }) {
                 borderRadius: 20, fontSize: 11, fontWeight: 700
             }}>
                 <XCircle size={12} />Cancelado
-            </span>
-        );
-    }
-
-    if (estado === 'Suspendido') {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#fce7f3', color: '#db2777', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <PauseCircle size={12} />Suspendido
             </span>
         );
     }
@@ -146,24 +148,24 @@ function KpiCard({ icon, label, value, sub, color }: {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export default function ControlDespachos({ pacientes, despachos, onRefresh }: ControlDespachosProps) {
+export default function ControlDespachos({ pacientes, medicamentos, despachos, onRefresh }: ControlDespachosProps) {
     const fileRef = useRef<HTMLInputElement>(null);
     const [loading, setLoading] = useState(false);
     const [feedback, setFeedback] = useState<{ tipo: 'ok' | 'error' | 'info'; msg: string } | null>(null);
     const [confirmandoId, setConfirmandoId] = useState<string | null>(null);
     const [actionModal, setActionModal] = useState<{
-        type: 'Cancelar' | 'Posponer' | 'Suspender';
+        type: 'Cancelar' | 'Posponer' | 'Agendar' | 'Entregar';
         despacho: Despacho;
     } | null>(null);
     const [actionValue, setActionValue] = useState('');
+    const [actionDate, setActionDate] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
     const [busqueda, setBusqueda] = useState('');
     const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todos');
     const [filtroCiclo, setFiltroCiclo] = useState('');
     const [filtroEps, setFiltroEps] = useState('');
     const [dragOver, setDragOver] = useState(false);
-    const [obsModal, setObsModal] = useState<{ id: string; firestoreId: string } | null>(null);
-    const [observaciones, setObservaciones] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [showCalendar, setShowCalendar] = useState(false);
     const [itemsPerPage, setItemsPerPage] = useState(10);
@@ -173,11 +175,11 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
     // ── Estadísticas ──────────────────────────────────────────────────────────
     const stats = useMemo(() => {
         const total = despachos.length;
-        const confirmados = despachos.filter(d => d.confirmado).length;
+        const entregados = despachos.filter(d => d.confirmado || d.estadoActual === 'Entregado').length;
         const vencidos = despachos.filter(d => esEntregaVencida(d)).length;
-        const urgentes = despachos.filter(d => !d.confirmado && esEntregaUrgente(d.fechaProgramada)).length;
-        const adherencia = total > 0 ? Math.round((confirmados / total) * 100) : 0;
-        return { total, confirmados, vencidos, urgentes, adherencia };
+        const urgentes = despachos.filter(d => !(d.confirmado || d.estadoActual === 'Entregado') && esEntregaUrgente(d.fechaProgramada)).length;
+        const adherencia = total > 0 ? Math.round((entregados / total) * 100) : 0;
+        return { total, entregados, vencidos, urgentes, adherencia };
     }, [despachos]);
 
     // ── Listas para filtros ───────────────────────────────────────────────────
@@ -195,28 +197,29 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                 !d.municipio.toLowerCase().includes(q)) return false;
             if (filtroEps && d.eps !== filtroEps) return false;
             if (filtroCiclo && d.ciclo !== filtroCiclo) return false;
-            if (filtroEstado === 'confirmados' && !d.confirmado && d.estadoActual !== 'Confirmado') return false;
+
+            const estado = d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente');
+
+            if (filtroEstado === 'entregados' && estado !== 'Entregado') return false;
+            if (filtroEstado === 'agendados' && estado !== 'Agendado') return false;
 
             if (filtroEstado === 'pendientes') {
-                // Un pendiente NO puede estar confirmado, ni cancelado, ni suspendido, ni ser vencido
-                const isFinalizado = d.confirmado || d.estadoActual === 'Confirmado' || d.estadoActual === 'Cancelado' || d.estadoActual === 'Suspendido' || d.estadoActual === 'Pospuesto';
-                if (isFinalizado || esEntregaVencida(d)) return false;
+                if (estado !== 'Pendiente' || esEntregaVencida(d)) return false;
             }
 
             if (filtroEstado === 'vencidos') {
-                // Solo vencidos que no estén confirmados ni cancelados
-                if (!esEntregaVencida(d) || d.confirmado || d.estadoActual === 'Confirmado' || d.estadoActual === 'Cancelado') return false;
+                if (!esEntregaVencida(d) || d.confirmado || estado === 'Entregado' || estado === 'Cancelado') return false;
             }
 
             if (filtroEstado === 'urgentes') {
-                // Urgentes que no estén confirmados ni cancelados/suspendidos
-                const isFinalizado = d.confirmado || d.estadoActual === 'Confirmado' || d.estadoActual === 'Cancelado' || d.estadoActual === 'Suspendido' || d.estadoActual === 'Pospuesto';
+                const isFinalizado = d.confirmado || estado === 'Entregado' || estado === 'Cancelado' || estado === 'Pospuesto';
                 if (!(esEntregaUrgente(d.fechaProgramada) && !isFinalizado)) return false;
             }
 
-            if (filtroEstado === 'cancelados' && d.estadoActual !== 'Cancelado') return false;
-            if (filtroEstado === 'pospuestos' && d.estadoActual !== 'Pospuesto') return false;
-            if (filtroEstado === 'suspendidos' && d.estadoActual !== 'Suspendido') return false;
+            if (filtroEstado === 'cancelados' && estado !== 'Cancelado') return false;
+            if (filtroEstado === 'pospuestos' && estado !== 'Pospuesto') return false;
+
+            return true;
 
             return true;
         });
@@ -234,7 +237,7 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                 else if (sortCol === 'medicamento') { valA = a.medicamento; valB = b.medicamento; }
                 else if (sortCol === 'eps') { valA = a.eps || ''; valB = b.eps || ''; }
                 else if (sortCol === 'ciclo') { valA = a.ciclo || ''; valB = b.ciclo || ''; }
-                else if (sortCol === 'estado') { valA = a.estadoActual || (a.confirmado ? 'Confirmado' : 'Pendiente'); valB = b.estadoActual || (b.confirmado ? 'Confirmado' : 'Pendiente'); }
+                else if (sortCol === 'estado') { valA = a.estadoActual || (a.confirmado ? 'Entregado' : 'Pendiente'); valB = b.estadoActual || (b.confirmado ? 'Entregado' : 'Pendiente'); }
                 const cmp = valA.localeCompare(valB, 'es', { sensitivity: 'base' });
                 return sortDir === 'asc' ? cmp : -cmp;
             });
@@ -286,17 +289,19 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
         setLoading(true);
         try {
             const text = await file.text();
-            const { prescripciones, errores } = parseCsvPrescripciones(text);
+            const { prescripciones, errores } = parseCsvPrescripciones(text, medicamentos);
             if (errores.length > 0 && prescripciones.length === 0) {
                 mostrarFeedback('error', errores[0]);
                 return;
             }
-            const nuevosDespachos = generarHojaRuta(prescripciones, pacientes, 6);
-            await addDespachos(nuevosDespachos);
+            setUploadProgress(1); // Inicia
+            const nuevosDespachos = generarHojaRuta(prescripciones, pacientes, 1);
+            await addDespachos(nuevosDespachos, (p) => setUploadProgress(p));
             mostrarFeedback('ok',
                 `✅ ${nuevosDespachos.length} entregas generadas desde ${prescripciones.length} prescripciones.` +
                 (errores.length > 0 ? ` (${errores.length} advertencias)` : '')
             );
+            setUploadProgress(0);
             onRefresh?.();
         } catch (err) {
             mostrarFeedback('error', 'Error al procesar el archivo CSV.');
@@ -323,11 +328,14 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
     const generarDesdePacientes = async () => {
         setLoading(true);
         try {
-            const nuevos = generarHojaRutaDesdePacientes(pacientes, 6);
-            await addDespachos(nuevos);
+            setUploadProgress(1);
+            const nuevos = generarHojaRutaDesdePacientes(pacientes, 1);
+            await addDespachos(nuevos, (p) => setUploadProgress(p));
             mostrarFeedback('ok', `✅ ${nuevos.length} entregas generadas desde ${pacientes.filter(p => p.estado.startsWith('AC')).length} pacientes activos.`);
+            setUploadProgress(0);
             onRefresh?.();
         } catch {
+            setUploadProgress(0);
             mostrarFeedback('error', 'Error al generar la hoja de ruta.');
         } finally {
             setLoading(false);
@@ -335,33 +343,16 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
     };
 
     // ── Confirmar despacho ────────────────────────────────────────────────────
-    const handleConfirmar = async (despacho: Despacho) => {
-        if (!despacho.firestoreId) {
-            mostrarFeedback('error', 'No se puede confirmar: falta el ID de Firestore.');
-            return;
-        }
-        setObsModal({ id: despacho.id, firestoreId: despacho.firestoreId });
-    };
-
-    const confirmar = async () => {
-        if (!obsModal) return;
-        setConfirmandoId(obsModal.id);
-        try {
-            await confirmarDespachoFS(obsModal.firestoreId, observaciones);
-            mostrarFeedback('ok', '✅ Despacho confirmado exitosamente.');
-            onRefresh?.();
-        } catch {
-            mostrarFeedback('error', 'Error al confirmar el despacho.');
-        } finally {
-            setConfirmandoId(null);
-            setObsModal(null);
-            setObservaciones('');
-        }
+    // Confirmación simple para agendar
+    const confirmarAgendamiento = async (despacho: Despacho) => {
+        setActionModal({ type: 'Agendar', despacho });
+        setActionValue('');
+        setActionDate(new Date().toISOString().split('T')[0]);
     };
 
     const ejecutarAccion = async () => {
         if (!actionModal) return;
-        if (!actionValue && actionModal.type !== 'Suspender') {
+        if (!actionValue && (actionModal.type === 'Cancelar' || actionModal.type === 'Posponer')) {
             mostrarFeedback('error', 'Por favor completa la información requerida.');
             return;
         }
@@ -372,11 +363,13 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
             if (!despacho.firestoreId) throw new Error('No FS ID');
 
             if (type === 'Posponer') {
-                await actualizarEstadoDespacho(despacho.firestoreId, 'Pospuesto', 'Reprogramación', actionValue);
+                await actualizarEstadoDespacho(despacho.firestoreId, 'Pospuesto', actionValue, actionDate);
             } else if (type === 'Cancelar') {
                 await actualizarEstadoDespacho(despacho.firestoreId, 'Cancelado', actionValue);
-            } else if (type === 'Suspender') {
-                await actualizarEstadoDespacho(despacho.firestoreId, 'Suspendido', actionValue);
+            } else if (type === 'Agendar') {
+                await actualizarEstadoDespacho(despacho.firestoreId, 'Agendado', actionValue, actionDate);
+            } else if (type === 'Entregar') {
+                await confirmarDespachoFS(despacho.firestoreId, actionValue, actionDate);
             }
 
             mostrarFeedback('ok', `✅ Despacho ${type.toLowerCase()} con éxito.`);
@@ -395,11 +388,14 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
     const limpiarTodo = async () => {
         if (!window.confirm('¿Deseas eliminar TODOS los despachos programados? Esta acción no se puede deshacer.')) return;
         setLoading(true);
+        setUploadProgress(1);
         try {
-            await eliminarTodosLosDespachos();
+            await eliminarTodosLosDespachos((p) => setUploadProgress(p));
             mostrarFeedback('info', 'Todos los despachos han sido eliminados.');
+            setUploadProgress(0);
             onRefresh?.();
         } catch {
+            setUploadProgress(0);
             mostrarFeedback('error', 'Error al eliminar los despachos.');
         } finally {
             setLoading(false);
@@ -414,11 +410,11 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                 <DespachoCalendar
                     despachos={despachos}
                     onClose={() => setShowCalendar(false)}
-                    onConfirm={async (id, obs) => {
+                    onConfirm={async (id, obs, fecha) => {
                         const d = despachos.find(x => x.id === id);
                         if (d?.firestoreId) {
                             try {
-                                await confirmarDespachoFS(d.firestoreId, obs);
+                                await confirmarDespachoFS(d.firestoreId, obs, fecha);
                                 mostrarFeedback('ok', '✅ Despacho confirmado desde el calendario.');
                                 onRefresh?.();
                             } catch {
@@ -457,62 +453,14 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                 </div>
             )}
 
-            {/* Modal de Observaciones */}
-            {obsModal && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9000,
-                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '80px 16px',
-                }}>
-                    <div style={{
-                        background: 'white', borderRadius: 16, padding: 28, width: '100%',
-                        maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-                    }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--gray-900)', marginBottom: 8 }}>
-                            Confirmar Despacho
-                        </h3>
-                        <p style={{ fontSize: 13, color: 'var(--gray-500)', marginBottom: 16 }}>
-                            Agrega observaciones opcionales antes de confirmar.
-                        </p>
-                        <textarea
-                            placeholder="Observaciones (opcional)..."
-                            value={observaciones}
-                            onChange={e => setObservaciones(e.target.value)}
-                            style={{
-                                width: '100%', minHeight: 80, borderRadius: 10, padding: '10px 12px',
-                                border: '1.5px solid var(--gray-200)', fontSize: 13, resize: 'vertical',
-                                fontFamily: 'inherit', boxSizing: 'border-box', outline: 'none',
-                            }}
-                        />
-                        <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => { setObsModal(null); setObservaciones(''); }}
-                                style={{
-                                    padding: '9px 18px', borderRadius: 10, border: '1.5px solid var(--gray-200)',
-                                    background: 'white', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                                    color: 'var(--gray-700)'
-                                }}>
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={confirmar}
-                                style={{
-                                    padding: '9px 18px', borderRadius: 10, border: 'none',
-                                    background: '#16a34a', color: 'white', cursor: 'pointer',
-                                    fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 7,
-                                }}>
-                                <CheckCircle2 size={15} />Confirmar Despacho
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Modal de Observaciones removido en favor de actionModal unificado */}
 
             {/* ═══ KPI Cards ═════════════════════════════════════════════════ */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14 }}>
                 <KpiCard icon={<BarChart2 size={20} />} label="Total Programadas" value={stats.total} color="#6366f1" />
-                <KpiCard icon={<CheckCircle2 size={20} />} label="Entregas Efectivas" value={stats.confirmados}
+                <KpiCard icon={<CheckCircle2 size={20} />} label="Entregas Efectivas" value={stats.entregados}
                     sub={`de ${stats.total} programadas`} color="#16a34a" />
-                <KpiCard icon={<Clock size={20} />} label="Pendientes" value={stats.total - stats.confirmados - stats.vencidos} color="#2563eb" />
+                <KpiCard icon={<Clock size={20} />} label="Pendientes" value={despachos.filter(d => (d.estadoActual || 'Pendiente') === 'Pendiente' && !esEntregaVencida(d)).length} color="#2563eb" />
                 <KpiCard icon={<AlertTriangle size={20} />} label="Vencidas" value={stats.vencidos} color="#dc2626" />
                 <KpiCard icon={<TrendingUp size={20} />} label="% Adherencia" value={`${stats.adherencia}%`}
                     sub="Efectivas vs. Programadas" color="#f59e0b" />
@@ -551,6 +499,22 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                     <span>Subir CSV <span style={{ color: 'var(--gray-400)', fontSize: 11 }}>(o arrastrar aquí)</span></span>
                     <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFileChange} />
                 </div>
+
+                {uploadProgress > 0 && (
+                    <div style={{ flex: '1 0 100%', maxWidth: 400, marginTop: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>PROCESANDO ENTREGAS...</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>{uploadProgress}%</span>
+                        </div>
+                        <div style={{ width: '100%', height: 6, background: '#f3f4f6', borderRadius: 10, overflow: 'hidden' }}>
+                            <div style={{
+                                width: `${uploadProgress}%`, height: '100%',
+                                background: 'linear-gradient(90deg, #6366f1, #a855f7)',
+                                transition: 'width 0.3s ease-out'
+                            }} />
+                        </div>
+                    </div>
+                )}
 
                 <button
                     onClick={() => setShowCalendar(true)}
@@ -618,12 +582,12 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                     <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value as FiltroEstado)} style={{ padding: '9px 32px 9px 28px', borderRadius: 10, border: '1.5px solid var(--gray-200)', fontSize: 13, cursor: 'pointer', outline: 'none', appearance: 'none', background: 'white' }}>
                         <option value="todos">Todos los estados</option>
                         <option value="pendientes">Pendientes</option>
+                        <option value="agendados">Agendados</option>
+                        <option value="entregados">Entregados</option>
                         <option value="urgentes">Urgentes (7 días)</option>
-                        <option value="confirmados">Confirmados</option>
+                        <option value="vencidos">Vencidos</option>
                         <option value="cancelados">Cancelados</option>
                         <option value="pospuestos">Pospuestos</option>
-                        <option value="suspendidos">Suspendidos</option>
-                        <option value="vencidos">Vencidos</option>
                     </select>
                     <ChevronDown size={13} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)', pointerEvents: 'none' }} />
                 </div>
@@ -699,11 +663,11 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                                 <thead>
                                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid var(--gray-100)' }}>
                                         {([
-                                            { key: 'fecha', label: 'Fecha Programada' },
-                                            { key: 'paciente', label: 'Paciente' },
-                                            { key: 'medicamento', label: 'Medicamento' },
-                                            { key: 'eps', label: 'EPS / Ciudad' },
-                                            { key: 'ciclo', label: 'Ciclo' },
+                                            { key: 'nota', label: 'Nota / Fecha' },
+                                            { key: 'paciente', label: 'Paciente / ID' },
+                                            { key: 'medicamento', label: 'Producto / ATC' },
+                                            { key: 'eps', label: 'Entidad / Ciudad' },
+                                            { key: 'ciclo', label: 'Ciclo / Duración' },
                                             { key: 'estado', label: 'Estado' },
                                             { key: null, label: 'Acciones' },
                                         ] as { key: string | null; label: string }[]).map(col => (
@@ -736,20 +700,37 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                                         return (
                                             <tr key={d.id} style={{ background: rowBg, borderBottom: '1px solid var(--gray-100)', transition: 'background 0.2s' }}>
                                                 <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center' }}>
-                                                        <Calendar size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
-                                                        <div style={{ textAlign: 'center' }}>
-                                                            <div style={{ fontWeight: 700, color: 'var(--gray-800)' }}>{d.fechaProgramada}</div>
-                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{formatFechaEntrega(d.fechaProgramada)}</div>
+                                                    <div style={{ textAlign: 'center' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center', marginBottom: 2 }}>
+                                                            {d.numeroNota ? (
+                                                                <span style={{ fontSize: 10, background: '#e0e7ff', color: '#4338ca', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                                                    #{d.numeroNota}
+                                                                </span>
+                                                            ) : (
+                                                                <span style={{ fontSize: 9, color: 'var(--gray-400)', fontStyle: 'italic' }}>Sin Nota</span>
+                                                            )}
                                                         </div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'center' }}>
+                                                            <Calendar size={13} style={{ color: 'var(--gray-400)' }} />
+                                                            <div style={{ fontWeight: 700, color: 'var(--gray-800)', fontSize: 13 }}>{d.fechaProgramada}</div>
+                                                        </div>
+                                                        <div style={{ fontSize: 10, color: 'var(--gray-400)' }}>{formatFechaEntrega(d.fechaProgramada)}</div>
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'left' }}>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'flex-start' }}>
                                                         <User size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
                                                         <div style={{ textAlign: 'left' }}>
-                                                            <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.nombreCompleto}</div>
-                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.pacienteId}</div>
+                                                            <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                                                {d.nombreCompleto}
+                                                                {d.genero && (
+                                                                    <span style={{ fontSize: 9, background: '#f3f4f6', color: '#6b7280', padding: '1px 4px', borderRadius: 3 }}>{d.genero}</span>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)', display: 'flex', gap: 8 }}>
+                                                                <span>ID: {d.pacienteId}</span>
+                                                                {d.telefonos && <span style={{ color: '#059669' }}>Tel: {d.telefonos}</span>}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -758,27 +739,32 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                                                         <Pill size={14} style={{ color: 'var(--gray-400)', flexShrink: 0 }} />
                                                         <div style={{ textAlign: 'left' }}>
                                                             <div style={{ fontWeight: 600, color: 'var(--gray-800)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.medicamento}</div>
-                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)' }}>{d.dosis}</div>
+                                                            <div style={{ fontSize: 11, color: 'var(--gray-400)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                                                                <span>{d.dosis}</span>
+                                                                {d.atc && (
+                                                                    <span style={{ fontSize: 9, color: 'var(--gray-500)', background: 'var(--gray-100)', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>{d.atc}</span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'left' }}>
                                                     <div style={{ textAlign: 'left' }}>
-                                                        <div style={{ fontWeight: 500, color: 'var(--gray-700)', fontSize: 12 }}>{d.eps || '—'}</div>
+                                                        <div style={{ fontWeight: 600, color: '#4f46e5', fontSize: 12 }}>{d.entidadAseguradora || d.eps || '—'}</div>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--gray-400)', justifyContent: 'flex-start' }}>
-                                                            <MapPin size={11} />{d.municipio || '—'}
+                                                            <MapPin size={11} />{d.ciudadResidencia || d.municipio}
                                                         </div>
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                    <span style={{
-                                                        padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                                                        background: d.ciclo === 'Quincenal' ? '#fef3c7' : d.ciclo === 'Semanal' ? '#ede9fe' : '#eff6ff',
-                                                        color: d.ciclo === 'Quincenal' ? '#b45309' : d.ciclo === 'Semanal' ? '#7c3aed' : '#2563eb',
-                                                        display: 'inline-block'
-                                                    }}>
-                                                        {d.ciclo}
-                                                    </span>
+                                                    <div style={{ display: 'inline-block', textAlign: 'center' }}>
+                                                        <div style={{ fontWeight: 700, fontSize: 11, color: '#d97706', background: '#fffbeb', border: '1px solid #fde68a', padding: '2px 8px', borderRadius: 20 }}>
+                                                            {d.ciclo}
+                                                        </div>
+                                                        <div style={{ fontSize: 10, color: 'var(--gray-400)', marginTop: 2 }}>
+                                                            Duración: {d.duracionTratamiento || 'Indef.'}
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
@@ -791,66 +777,86 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
                                                     </div>
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'center' }}>
-                                                    {!d.confirmado ? (
-                                                        <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                                                            <button
-                                                                onClick={() => handleConfirmar(d)}
-                                                                disabled={confirmandoId === d.id}
-                                                                style={{
-                                                                    padding: '6px 10px', borderRadius: 8, border: 'none',
-                                                                    background: '#16a34a', color: 'white', cursor: 'pointer',
-                                                                    fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4,
-                                                                    opacity: confirmandoId === d.id ? 0.6 : 1, transition: 'all 0.2s',
-                                                                }}
-                                                                title="Confirmar Entrega"
-                                                            >
-                                                                Confirmar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => {
-                                                                    setActionModal({ type: 'Cancelar', despacho: d });
-                                                                    setActionValue('Paciente no requiere medicamento');
-                                                                }}
-                                                                style={{
-                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #dc2626',
-                                                                    background: 'transparent', color: '#dc2626', cursor: 'pointer',
-                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                                }}
-                                                                title="Cancelar Entrega"
-                                                            >
-                                                                Cancelar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setActionModal({ type: 'Posponer', despacho: d })}
-                                                                style={{
-                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #2563eb',
-                                                                    background: 'transparent', color: '#2563eb', cursor: 'pointer',
-                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                                }}
-                                                                title="Posponer Entrega"
-                                                            >
-                                                                Posponer
-                                                            </button>
-                                                            <button
-                                                                onClick={() => setActionModal({ type: 'Suspender', despacho: d })}
-                                                                style={{
-                                                                    padding: '6px 10px', borderRadius: 8, border: '1px solid #4b5563',
-                                                                    background: 'transparent', color: '#4b5563', cursor: 'pointer',
-                                                                    fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
-                                                                }}
-                                                                title="Suspender Entrega"
-                                                            >
-                                                                Suspender
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
-                                                            <span style={{ fontSize: 12, color: d.estadoActual === 'Cancelado' ? '#dc2626' : d.estadoActual === 'Suspendido' ? '#4b5563' : '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-                                                                {d.estadoActual === 'Cancelado' ? '✕ Cancelado' : d.estadoActual === 'Suspendido' ? '⏸ Suspendido' : '✓ Despachado'}
-                                                            </span>
-                                                            {d.motivo && <span style={{ fontSize: 10, color: 'var(--gray-500)', fontStyle: 'italic', textAlign: 'center' }}>{d.motivo}</span>}
-                                                        </div>
-                                                    )}
+                                                    {(() => {
+                                                        const estado = d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente');
+                                                        if (estado === 'Pendiente') {
+                                                            return (
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setActionModal({ type: 'Agendar', despacho: d });
+                                                                        setActionDate(new Date().toISOString().split('T')[0]);
+                                                                        setActionValue('');
+                                                                    }}
+                                                                    style={{
+                                                                        padding: '6px 12px', borderRadius: 8, border: 'none',
+                                                                        background: '#0369a1', color: 'white', cursor: 'pointer',
+                                                                        fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+                                                                    }}
+                                                                >
+                                                                    Agendar
+                                                                </button>
+                                                            );
+                                                        }
+                                                        if (estado === 'Agendado' || estado === 'Pospuesto') {
+                                                            return (
+                                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setActionModal({ type: 'Entregar', despacho: d });
+                                                                            setActionDate(new Date().toISOString().split('T')[0]);
+                                                                            setActionValue('');
+                                                                        }}
+                                                                        style={{
+                                                                            padding: '6px 10px', borderRadius: 8, border: 'none',
+                                                                            background: '#16a34a', color: 'white', cursor: 'pointer',
+                                                                            fontSize: 11, fontWeight: 700, transition: 'all 0.2s',
+                                                                        }}
+                                                                    >
+                                                                        Entregar
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setActionModal({ type: 'Posponer', despacho: d });
+                                                                            setActionDate(d.fechaProgramada);
+                                                                            setActionValue('');
+                                                                        }}
+                                                                        style={{
+                                                                            padding: '6px 10px', borderRadius: 8, border: '1px solid #2563eb',
+                                                                            background: 'transparent', color: '#2563eb', cursor: 'pointer',
+                                                                            fontSize: 11, fontWeight: 700,
+                                                                        }}
+                                                                    >
+                                                                        Posponer
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setActionModal({ type: 'Cancelar', despacho: d });
+                                                                            setActionValue('');
+                                                                        }}
+                                                                        style={{
+                                                                            padding: '6px 10px', borderRadius: 8, border: '1px solid #dc2626',
+                                                                            background: 'transparent', color: '#dc2626', cursor: 'pointer',
+                                                                            fontSize: 11, fontWeight: 700,
+                                                                        }}
+                                                                    >
+                                                                        Cancelar
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+                                                                <span style={{
+                                                                    fontSize: 12,
+                                                                    color: estado === 'Cancelado' ? '#dc2626' : '#16a34a',
+                                                                    fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
+                                                                }}>
+                                                                    {estado === 'Cancelado' ? '✕ Cancelado' : '✓ Entregado'}
+                                                                </span>
+                                                                {d.motivo && <span style={{ fontSize: 10, color: 'var(--gray-500)', fontStyle: 'italic' }}>{d.motivo}</span>}
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </td>
                                             </tr>
                                         );
@@ -914,65 +920,101 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
 
             {/* ═══ Modal de Acciones (Cancelar/Posponer/Suspender) ═══ */}
             {actionModal && (
-                <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-                    <div style={{ background: 'white', borderRadius: 16, width: '100%', maxWidth: 400, padding: 24, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-                        <h3 style={{ margin: '0 0 12px', fontSize: 18, fontWeight: 700, color: 'var(--gray-900)' }}>
-                            {actionModal.type} Despacho
-                        </h3>
-                        <p style={{ fontSize: 13, color: 'var(--gray-600)', marginBottom: 20 }}>
-                            {actionModal.type === 'Posponer'
-                                ? 'Selecciona la nueva fecha para esta entrega:'
-                                : `Indica el motivo para ${actionModal.type.toLowerCase()} esta programación:`}
+                <div style={{
+                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9000,
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '120px 16px',
+                    backdropFilter: 'blur(4px)'
+                }}>
+                    <div style={{
+                        background: 'white', borderRadius: 24, padding: 32, width: '100%',
+                        maxWidth: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                        position: 'relative', animation: 'modalSlideUp 0.3s ease-out'
+                    }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                            <h3 style={{ fontSize: 20, fontWeight: 800, color: '#111827', margin: 0 }}>
+                                {actionModal.type} Entrega
+                            </h3>
+                            <button onClick={() => setActionModal(null)} style={{ background: '#f3f4f6', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 8, borderRadius: '50%', display: 'flex' }}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <p style={{ fontSize: 14, color: '#4b5563', marginBottom: 24, lineHeight: 1.6 }}>
+                            {actionModal.type === 'Agendar' && 'Confirma que vas a agendar esta entrega para su seguimiento y gestión logística.'}
+                            {actionModal.type === 'Entregar' && 'Registra que el medicamento ha sido entregado satisfactoriamente al paciente.'}
+                            {actionModal.type === 'Cancelar' && 'Por favor, selecciona el motivo principal para cancelar esta entrega programada.'}
+                            {actionModal.type === 'Posponer' && 'Selecciona el motivo y la nueva fecha propuesta para realizar esta entrega.'}
                         </p>
 
-                        {actionModal.type === 'Posponer' ? (
-                            <input
-                                type="date"
-                                value={actionValue}
-                                onChange={(e) => setActionValue(e.target.value)}
-                                style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1.5px solid var(--gray-200)', marginBottom: 20, outline: 'none' }}
-                            />
-                        ) : (
-                            <select
-                                value={actionValue}
-                                onChange={(e) => setActionValue(e.target.value)}
-                                style={{ width: '100%', padding: '10px', borderRadius: 8, border: '1.5px solid var(--gray-200)', marginBottom: 20, outline: 'none', background: 'white' }}
-                            >
-                                <option value="">Seleccione un motivo...</option>
-                                {actionModal.type === 'Cancelar' ? (
-                                    <>
-                                        <option value="Paciente fallecido">Paciente fallecido</option>
-                                        <option value="Error en prescripción">Error en prescripción</option>
-                                        <option value="Duplicado">Duplicado</option>
-                                        <option value="Paciente trasladado">Paciente trasladado</option>
-                                        <option value="Paciente no requiere medicamento">Paciente no requiere medicamento</option>
-                                    </>
-                                ) : (
-                                    <>
-                                        <option value="Falta de inventario (Stock-out)">Falta de inventario (Stock-out)</option>
-                                        <option value="Dirección incorrecta">Dirección incorrecta</option>
-                                        <option value="Documentación incompleta">Documentación incompleta</option>
-                                        <option value="Paciente solicita pausa">Paciente solicita pausa</option>
-                                    </>
-                                )}
-                            </select>
-                        )}
+                        <div style={{ marginBottom: 24 }}>
+                            {(actionModal.type === 'Agendar' || actionModal.type === 'Posponer' || actionModal.type === 'Entregar') && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.05 }}>
+                                        Fecha de {actionModal.type === 'Entregar' ? 'Entrega' : actionModal.type === 'Agendar' ? 'Agendamiento' : 'Reprogramación'}
+                                    </label>
+                                    <input
+                                        type="date"
+                                        value={actionDate}
+                                        onChange={(e) => setActionDate(e.target.value)}
+                                        style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14 }}
+                                    />
+                                </div>
+                            )}
 
-                        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.05 }}>
+                                {actionModal.type === 'Entregar' || actionModal.type === 'Agendar' ? 'Notas / Observaciones' : 'Motivo Requerido'}
+                            </label>
+
+                            {actionModal.type === 'Cancelar' || actionModal.type === 'Posponer' ? (
+                                <select
+                                    value={actionValue}
+                                    onChange={e => setActionValue(e.target.value)}
+                                    style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, background: '#fff' }}
+                                >
+                                    <option value="">Seleccione una opción...</option>
+                                    {actionModal.type === 'Cancelar' ? (
+                                        <>
+                                            <option value="Paciente fallecido">Paciente fallecido</option>
+                                            <option value="Error en prescripción">Error en prescripción</option>
+                                            <option value="Duplicado">Duplicado</option>
+                                            <option value="Paciente trasladado">Paciente trasladado</option>
+                                            <option value="Paciente no requiere medicamento">Paciente no requiere medicamento</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="Falta de inventario (Stock-out)">Falta de inventario (Stock-out)</option>
+                                            <option value="Dirección incorrecta">Dirección incorrecta</option>
+                                            <option value="Documentación incompleta">Documentación incompleta</option>
+                                            <option value="Paciente solicita pausa">Paciente solicita pausa</option>
+                                        </>
+                                    )}
+                                </select>
+                            ) : (
+                                <textarea
+                                    placeholder="Puedes añadir notas adicionales aquí..."
+                                    value={actionValue}
+                                    onChange={e => setActionValue(e.target.value)}
+                                    style={{ width: '100%', minHeight: 80, padding: '14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, resize: 'none', fontFamily: 'inherit' }}
+                                />
+                            )}
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                             <button
                                 onClick={() => setActionModal(null)}
-                                style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--gray-200)', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                                style={{ padding: '12px 24px', borderRadius: 12, border: '1.5px solid #e5e7eb', background: 'white', color: '#4b5563', fontSize: 14, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
                             >
-                                Volver
+                                Cancelar
                             </button>
                             <button
                                 onClick={ejecutarAccion}
                                 disabled={actionLoading}
                                 style={{
-                                    padding: '10px 16px', borderRadius: 10, border: 'none',
-                                    background: actionModal.type === 'Cancelar' ? '#dc2626' : actionModal.type === 'Posponer' ? '#2563eb' : '#4b5563',
-                                    color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                                    opacity: actionLoading ? 0.7 : 1
+                                    padding: '12px 28px', borderRadius: 12, border: 'none',
+                                    background: actionModal.type === 'Cancelar' ? '#dc2626' : actionModal.type === 'Agendar' ? '#0369a1' : '#16a34a',
+                                    color: 'white', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                                    boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+                                    opacity: actionLoading ? 0.7 : 1, transition: 'all 0.2s'
                                 }}
                             >
                                 {actionLoading ? 'Procesando...' : `Confirmar ${actionModal.type}`}
@@ -984,18 +1026,21 @@ export default function ControlDespachos({ pacientes, despachos, onRefresh }: Co
 
             {/* ═══ Leyenda ════════════════════════════════════════════════════ */}
             {despachos.length > 0 && (
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--gray-500)' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#dcfce7', display: 'inline-block' }} />Confirmado
+                <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12, color: 'var(--gray-500)', marginTop: 10 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#dcfce7', display: 'inline-block' }} />Entregado
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fef3c7', display: 'inline-block' }} />Urgente (≤7 días)
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#e0f2fe', display: 'inline-block' }} />Agendado
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fee2e2', display: 'inline-block' }} />Vencido
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#eff6ff', display: 'inline-block' }} />Pendiente
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#f1f5f9', border: '1px solid #e2e8f0', display: 'inline-block' }} />Pendiente
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fef3c7', display: 'inline-block' }} />Urgente (≤7 días) / Pospuesto
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fee2e2', display: 'inline-block' }} />Vencido / Cancelado
                     </span>
                 </div>
             )}

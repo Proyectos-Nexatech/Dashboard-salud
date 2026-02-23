@@ -5,39 +5,60 @@
 
 /** Prescripción cargada desde CSV o derivada de un Paciente */
 export interface Prescripcion {
-    pacienteId: string;        // CC o número de identificación
+    numeroNota: string;
+    pacienteId: string;
+    nombre1: string;
+    nombre2: string;
+    apellido1: string;
+    apellido2: string;
     nombreCompleto: string;
+    telefonos: string;
+    genero: string;
+    ciudadResidencia: string;
+    entidadAseguradora: string;
+    atc: string;
     medicamento: string;
+    duracionTratamiento: string;
     dosis: string;
-    eps: string;
     municipio: string;
+    eps: string;
     diasAdministracion: number;
     diasDescanso: number;
-    periodicidadDias?: number; // Si viene explícita en el CSV
+    periodicidadDias?: number;
 }
 
 /** Una entrega proyectada (fecha futura calculada) */
 export interface EntregaProgramada {
-    id: string;                // Generado: `${pacienteId}_${fechaIso}`
+    id: string;
+    numeroNota: string;
     pacienteId: string;
+    nombre1: string;
+    nombre2: string;
+    apellido1: string;
+    apellido2: string;
     nombreCompleto: string;
+    telefonos: string;
+    genero: string;
+    ciudadResidencia: string;
+    entidadAseguradora: string;
+    atc: string;
     medicamento: string;
+    duracionTratamiento: string;
     eps: string;
     municipio: string;
     dosis: string;
     ciclo: 'Mensual' | 'Quincenal' | 'Semanal';
     diasEntrega: number;
-    fechaProgramada: string;   // ISO format: 'YYYY-MM-DD'
+    fechaProgramada: string;
 }
 
 /** Un despacho concreto (puede estar pendiente o confirmado) */
 export interface Despacho extends EntregaProgramada {
     confirmado: boolean;
-    fechaConfirmacion?: string; // ISO format
+    fechaConfirmacion?: string;
     observaciones?: string;
-    // Firestore doc id (se asigna después de save)
     firestoreId?: string;
-    estadoActual?: 'Pendiente' | 'Confirmado' | 'Cancelado' | 'Pospuesto' | 'Suspendido';
+    estadoActual?: 'Pendiente' | 'Agendado' | 'Entregado' | 'Cancelado' | 'Pospuesto';
     motivo?: string;
 }
 

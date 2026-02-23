@@ -21,6 +21,9 @@ const MEDICAMENTOS_COLLECTION = 'medicamentos';
  */
 const normalize = (s: string) => s ? s.toUpperCase().replace(/\s+/g, ' ').trim() : '';
 
+// Helper function to sanitize document IDs. Firestore IDs cannot contain / and must have even segments.
+const sanitizeDocId = (name: string) => normalize(name).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
+
 export function subscribeToMedicamentos(callback: (meds: MedicamentoInfo[]) => void): Unsubscribe {
     const q = query(collection(db, MEDICAMENTOS_COLLECTION), orderBy('medicamento', 'asc'));
     return onSnapshot(q, (snapshot) => {
@@ -30,19 +33,19 @@ export function subscribeToMedicamentos(callback: (meds: MedicamentoInfo[]) => v
 }
 
 export async function addMedicamento(m: MedicamentoInfo): Promise<void> {
-    const docId = normalize(m.medicamento).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+    const docId = sanitizeDocId(m.medicamento);
     const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
     await setDoc(ref, m);
     console.log(`✅ Medicamento creado: ${m.medicamento}`);
 }
 
 export async function updateMedicamento(m: MedicamentoInfo, originalName?: string): Promise<void> {
-    const docId = originalName ? normalize(originalName).replace(/[\\/\\.#\\$\\[\\]]/g, '_') : normalize(m.medicamento).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+    const docId = originalName ? sanitizeDocId(originalName) : sanitizeDocId(m.medicamento);
 
     if (originalName && normalize(originalName) !== normalize(m.medicamento)) {
         // Name changed, delete old and create new
         await deleteDoc(doc(db, MEDICAMENTOS_COLLECTION, docId));
-        const newDocId = normalize(m.medicamento).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+        const newDocId = normalize(m.medicamento).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
         await setDoc(doc(db, MEDICAMENTOS_COLLECTION, newDocId), m);
     } else {
         const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
@@ -52,7 +55,7 @@ export async function updateMedicamento(m: MedicamentoInfo, originalName?: strin
 }
 
 export async function deleteMedicamento(name: string): Promise<void> {
-    const docId = normalize(name).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+    const docId = normalize(name).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
     const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
     await deleteDoc(ref);
     console.log(`🗑️ Medicamento eliminado: ${name}`);
@@ -64,7 +67,7 @@ export async function deleteMedicamentosBatch(names: string[]): Promise<void> {
         const batch = writeBatch(db);
         const chunk = names.slice(i, i + BATCH_LIMIT);
         for (const name of chunk) {
-            const docId = normalize(name).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+            const docId = normalize(name).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
             const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
             batch.delete(ref);
         }
@@ -79,7 +82,7 @@ export async function seedMedicamentosFromMock(): Promise<void> {
         console.log('🌱 Seeding medicamentos from mock data...');
         const batch = writeBatch(db);
         MEDICAMENTOS_LIST.forEach(m => {
-            const docId = normalize(m.medicamento).replace(/[\\/\\.#\\$\\[\\]]/g, '_');
+            const docId = normalize(m.medicamento).replace(/[\/\.\#\$\{\}\[\]]/g, '_');
             const ref = doc(db, MEDICAMENTOS_COLLECTION, docId);
             batch.set(ref, m);
         });

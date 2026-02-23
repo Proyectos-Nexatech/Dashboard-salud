@@ -192,6 +192,7 @@ export default function App() {
                 return (
                     <ControlDespachos
                         pacientes={pacientes}
+                        medicamentos={medicamentos}
                         despachos={despachos}
                         onRefresh={() => console.log('Despachos refreshed')}
                     />

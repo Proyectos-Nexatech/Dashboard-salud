@@ -21,9 +21,20 @@ const DESPACHOS_COLLECTION = 'despachos';
 function toFirestoreDoc(d: Despacho): Record<string, unknown> {
     return {
         id: d.id,
+        numeroNota: d.numeroNota || '',
         pacienteId: d.pacienteId,
+        nombre1: d.nombre1 || '',
+        nombre2: d.nombre2 || '',
+        apellido1: d.apellido1 || '',
+        apellido2: d.apellido2 || '',
         nombreCompleto: d.nombreCompleto,
+        telefonos: d.telefonos || '',
+        genero: d.genero || '',
+        ciudadResidencia: d.ciudadResidencia,
+        entidadAseguradora: d.entidadAseguradora || '',
+        atc: d.atc || '',
         medicamento: d.medicamento,
+        duracionTratamiento: d.duracionTratamiento || '',
         eps: d.eps,
         municipio: d.municipio,
         dosis: d.dosis,
@@ -33,7 +44,7 @@ function toFirestoreDoc(d: Despacho): Record<string, unknown> {
         confirmado: d.confirmado,
         fechaConfirmacion: d.fechaConfirmacion || '',
         observaciones: d.observaciones || '',
-        estadoActual: d.estadoActual || (d.confirmado ? 'Confirmado' : 'Pendiente'),
+        estadoActual: d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente'),
         motivo: d.motivo || '',
         _updatedAt: new Date().toISOString(),
     };
@@ -43,9 +54,20 @@ function fromFirestoreDoc(data: Record<string, unknown>, firestoreId: string): D
     return {
         firestoreId,
         id: String(data.id ?? ''),
+        numeroNota: String(data.numeroNota ?? ''),
         pacienteId: String(data.pacienteId ?? ''),
+        nombre1: String(data.nombre1 ?? ''),
+        nombre2: String(data.nombre2 ?? ''),
+        apellido1: String(data.apellido1 ?? ''),
+        apellido2: String(data.apellido2 ?? ''),
         nombreCompleto: String(data.nombreCompleto ?? ''),
+        telefonos: String(data.telefonos ?? ''),
+        genero: String(data.genero ?? ''),
+        ciudadResidencia: String(data.ciudadResidencia ?? ''),
+        entidadAseguradora: String(data.entidadAseguradora ?? ''),
+        atc: String(data.atc ?? ''),
         medicamento: String(data.medicamento ?? ''),
+        duracionTratamiento: String(data.duracionTratamiento ?? ''),
         eps: String(data.eps ?? ''),
         municipio: String(data.municipio ?? ''),
         dosis: String(data.dosis ?? ''),
@@ -55,7 +77,7 @@ function fromFirestoreDoc(data: Record<string, unknown>, firestoreId: string): D
         confirmado: Boolean(data.confirmado),
         fechaConfirmacion: data.fechaConfirmacion ? String(data.fechaConfirmacion) : undefined,
         observaciones: data.observaciones ? String(data.observaciones) : undefined,
-        estadoActual: (data.estadoActual as Despacho['estadoActual']) ?? (Boolean(data.confirmado) ? 'Confirmado' : 'Pendiente'),
+        estadoActual: (data.estadoActual as Despacho['estadoActual']) ?? (Boolean(data.confirmado) ? 'Entregado' : 'Pendiente'),
         motivo: data.motivo ? String(data.motivo) : undefined,
     };
 }
@@ -83,31 +105,40 @@ export function subscribeToDespachos(
 /**
  * Agrega una lista de despachos a Firestore en batch.
  * Usa el campo `id` del despacho como document ID para evitar duplicados.
+ * @param onProgress Callback opcional para monitorear el progreso (0 a 100)
  */
-export async function addDespachos(despachos: Despacho[]): Promise<void> {
-    // Check existing to avoid duplicates
-    const snap = await getDocs(collection(db, DESPACHOS_COLLECTION));
-    const existing = new Set(snap.docs.map(d => d.id));
+export async function addDespachos(
+    despachos: Despacho[],
+    onProgress?: (progress: number) => void
+): Promise<void> {
+    const total = despachos.length;
+    if (total === 0) return;
 
+    // Para evitar leer miles de documentos (ahorro de quota), 
+    // procesamos en bloques y enviamos.
     let batch = writeBatch(db);
     let count = 0;
+    let processed = 0;
 
     for (const d of despachos) {
-        if (!existing.has(d.id)) {
-            const ref = doc(db, DESPACHOS_COLLECTION, d.id);
-            batch.set(ref, toFirestoreDoc(d));
-            count++;
+        const ref = doc(db, DESPACHOS_COLLECTION, d.id);
+        batch.set(ref, toFirestoreDoc(d), { merge: true });
+        count++;
+        processed++;
 
-            // Firestore batches limited to 500 ops
-            if (count % 400 === 0) {
-                await batch.commit();
-                batch = writeBatch(db);
-            }
+        // Firestore batches limited to 500 ops
+        if (count >= 400) {
+            await batch.commit();
+            await new Promise(r => setTimeout(r, 200)); // Pequeña pausa para no saturar la cuota de escritura por segundo
+            batch = writeBatch(db);
+            count = 0;
+            if (onProgress) onProgress(Math.round((processed / total) * 100));
         }
     }
 
-    if (count % 400 !== 0) {
+    if (count > 0) {
         await batch.commit();
+        if (onProgress) onProgress(100);
     }
 }
 
@@ -116,13 +147,14 @@ export async function addDespachos(despachos: Despacho[]): Promise<void> {
  */
 export async function confirmarDespacho(
     firestoreId: string,
-    observaciones?: string
+    observaciones?: string,
+    fechaConfirmacion?: string
 ): Promise<void> {
     const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
     await updateDoc(ref, {
         confirmado: true,
-        estadoActual: 'Confirmado',
-        fechaConfirmacion: new Date().toISOString().split('T')[0],
+        estadoActual: 'Entregado',
+        fechaConfirmacion: fechaConfirmacion || new Date().toISOString().split('T')[0],
         observaciones: observaciones || '',
         _updatedAt: new Date().toISOString(),
     });
@@ -146,8 +178,8 @@ export async function actualizarEstadoDespacho(
     if (nuevaFecha) {
         updates.fechaProgramada = nuevaFecha;
     }
-    // Si se cancela o suspende, nos aseguramos que confirmado sea false
-    if (nuevoEstado === 'Cancelado' || nuevoEstado === 'Suspendido' || nuevoEstado === 'Pospuesto') {
+    // Si se cancela o pospone, nos aseguramos que confirmado sea false
+    if (nuevoEstado === 'Cancelado' || nuevoEstado === 'Pospuesto') {
         updates.confirmado = false;
     }
     await updateDoc(ref, updates);
@@ -158,21 +190,50 @@ export async function actualizarEstadoDespacho(
  */
 export async function eliminarDespachosPaciente(pacienteId: string): Promise<void> {
     const snap = await getDocs(collection(db, DESPACHOS_COLLECTION));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => {
+    let batch = writeBatch(db);
+    let count = 0;
+
+    for (const d of snap.docs) {
         if (d.data().pacienteId === pacienteId) {
             batch.delete(doc(db, DESPACHOS_COLLECTION, d.id));
+            count++;
+            if (count >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                count = 0;
+            }
         }
-    });
-    await batch.commit();
+    }
+    if (count > 0) await batch.commit();
 }
 
 /**
  * Elimina todos los despachos en bulk (para reset completo).
  */
-export async function eliminarTodosLosDespachos(): Promise<void> {
+export async function eliminarTodosLosDespachos(onProgress?: (progress: number) => void): Promise<void> {
     const snap = await getDocs(collection(db, DESPACHOS_COLLECTION));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => batch.delete(doc(db, DESPACHOS_COLLECTION, d.id)));
-    await batch.commit();
+    const total = snap.docs.length;
+    if (total === 0) return;
+
+    let batch = writeBatch(db);
+    let count = 0;
+    let processed = 0;
+
+    for (const d of snap.docs) {
+        batch.delete(doc(db, DESPACHOS_COLLECTION, d.id));
+        count++;
+        processed++;
+
+        if (count >= 400) {
+            await batch.commit();
+            await new Promise(r => setTimeout(r, 100)); // Pausa suave
+            batch = writeBatch(db);
+            count = 0;
+            if (onProgress) onProgress(Math.round((processed / total) * 100));
+        }
+    }
+    if (count > 0) {
+        await batch.commit();
+        if (onProgress) onProgress(100);
+    }
 }

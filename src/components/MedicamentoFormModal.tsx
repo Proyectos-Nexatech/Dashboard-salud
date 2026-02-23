@@ -11,6 +11,7 @@ interface MedicamentoFormModalProps {
 
 const INITIAL_FORM: MedicamentoInfo = {
     medicamento: '',
+    atc: '',
     presentacionComercial: 0,
     dosisEstandar: '',
     diasAdministracion: 0,
@@ -51,6 +52,7 @@ export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicame
     const validate = () => {
         const newErrors: Record<string, boolean> = {};
         if (!form.medicamento?.trim()) newErrors.medicamento = true;
+        if (!form.atc?.trim()) newErrors.atc = true;
         if (!form.dosisEstandar?.trim()) newErrors.dosisEstandar = true;
 
         setErrors(newErrors);
@@ -91,19 +93,34 @@ export default function MedicamentoFormModal({ isOpen, onClose, onSave, medicame
                 <form onSubmit={handleSubmit}>
                     <div style={{ padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 20, maxHeight: '80vh', overflowY: 'auto' }}>
 
-                        {/* Nombre del Medicamento */}
-                        <div className="form-group">
-                            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', marginBottom: 8 }}>
-                                Nombre del Medicamento *
-                            </label>
-                            <input
-                                type="text"
-                                className="header-search"
-                                style={{ width: '100%', borderColor: errors.medicamento ? '#ef4444' : undefined }}
-                                value={form.medicamento}
-                                onChange={e => handleChange('medicamento', e.target.value.toUpperCase())}
-                                placeholder="Ej: ABEMACILIB X 150 MG"
-                            />
+                        {/* Nombre y ATC */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 20 }}>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', marginBottom: 8 }}>
+                                    Nombre del Medicamento *
+                                </label>
+                                <input
+                                    type="text"
+                                    className="header-search"
+                                    style={{ width: '100%', borderColor: errors.medicamento ? '#ef4444' : undefined }}
+                                    value={form.medicamento}
+                                    onChange={e => handleChange('medicamento', e.target.value.toUpperCase())}
+                                    placeholder="Ej: ABEMACILIB X 150 MG"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: 'var(--gray-500)', textTransform: 'uppercase', marginBottom: 8 }}>
+                                    Código ATC *
+                                </label>
+                                <input
+                                    type="text"
+                                    className="header-search"
+                                    style={{ width: '100%', borderColor: errors.atc ? '#ef4444' : undefined }}
+                                    value={form.atc}
+                                    onChange={e => handleChange('atc', e.target.value.toUpperCase())}
+                                    placeholder="Ej: L01EF03"
+                                />
+                            </div>
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>

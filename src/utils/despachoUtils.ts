@@ -1,17 +1,12 @@
 import type { Prescripcion, EntregaProgramada, Despacho } from '../data/despachoTypes';
-import { getConfiguracionMedicamento, ConfiguracionTratamientos } from '../data/despachoTypes';
+import { getConfiguracionMedicamento } from '../data/despachoTypes';
+import { MEDICAMENTOS_LIST, type MedicamentoInfo } from '../data/medicamentosData';
 import type { Paciente } from '../data/mockData';
-
-// ─── Parser CSV ───────────────────────────────────────────────────────────────
 
 /**
  * Convierte el texto de un archivo CSV en una lista de Prescripciones.
- * Columnas esperadas (flexible, case-insensitive):
- *   tipo_identificacion, numero_identificacion, nombre_completo,
- *   medicamento, dosis, eps, municipio
- * También acepta formato simplificado con algunas columnas opcionales.
  */
-export function parseCsvPrescripciones(csvText: string): {
+export function parseCsvPrescripciones(csvText: string, medicamentosDB: MedicamentoInfo[] = []): {
     prescripciones: Prescripcion[];
     errores: string[];
 } {
@@ -32,19 +27,22 @@ export function parseCsvPrescripciones(csvText: string): {
         .replace(/_+/g, '_')
         .trim();
 
-    // Sistema de alias refinado (según imágenes del usuario)
     const ALIASES = {
-        'id': ['identificacion', 'numero_de_ic', 'numero_de_ident', 'cedula', 'documento', 'cc', 'paciente_id', 'doc_paciente', 'ic', 'nro_id', 'historia_clinica', 'hc', 'paciente'],
-        'n1': ['nombre_1', 'primer_nombre', 'nombre', 'name_1', 'primer_nom', 'paciente'],
-        'n2': ['nombre_2', 'segundo_nombre', 'name_2', 'segundo_nom'],
-        'a1': ['apellido_1', 'primer_apellido', 'apelido_1', 'primer_ape', 'apellido'],
-        'a2': ['apellido_2', 'segundo_apellido', 'apelido_2', 'segundo_ape'],
-        'med': ['formulacion', 'descripcion', 'producto', 'medicamento', 'insumo', 'nombre_del_insumo', 'prestacion', 'formula', 'articulo', 'h_producto', 'item', 'desc_med'],
-        'dpto': ['departamento', 'depto', 'regional'],
-        'ciudad': ['ciudad_de_re', 'ciudad', 'municipio', 'localidad', 'poblacion']
+        'nota': ['numero_nota', 'nota', 'nro_nota'],
+        'id': ['identificaci', 'documento', 'cedula', 'identificacion', 'numero_de_ident', 'nro_ident', 'paciente_id'],
+        'n1': ['nombre_1', 'primer_nombre', 'nombre1', 'names'],
+        'n2': ['nombre_2', 'segundo_nombre', 'nombre2'],
+        'a1': ['apellido_1', 'primer_apellido', 'apellido1', 'apellidos'],
+        'a2': ['apellido_2', 'segundo_apellido', 'apellido2'],
+        'tel': ['telefonos', 'telefono', 'celular', 'movil'],
+        'gen': ['genero', 'sexo', 'sex'],
+        'ciudad': ['ciudad_de_residencia', 'ciudad', 'municipio', 'localidad'],
+        'entidad': ['entidad_aseguradora', 'eps', 'aseguradora', 'entidad'],
+        'atc': ['atc', 'codigo_atc', 'code_atc'],
+        'med': ['medicamento', 'producto', 'descripcion', 'insumo'],
+        'dur': ['duracion_de_tratamiento', 'duracion', 'tratamiento_dias']
     };
 
-    // Buscar la fila de encabezados
     let headerRowIndex = -1;
     let headerMap: Record<string, number> = {};
     let separator = ',';
@@ -65,26 +63,75 @@ export function parseCsvPrescripciones(csvText: string): {
         if (matches >= 2) {
             headerRowIndex = j;
             separator = sep;
-            // Guardar solo la PRIMERA vez que aparece un nombre de columna (para no sobrescribir el texto con códigos)
             norm.forEach((h, i) => {
                 if (h && headerMap[h] === undefined) {
                     headerMap[h] = i;
                 }
             });
             console.log("Cabecera encontrada en línea:", j, "Separador:", sep);
-            console.log("Mapa de columnas (primeras ocurrencias):", headerMap);
             break;
         }
     }
 
     if (headerRowIndex === -1) {
-        console.error("No se encontró una cabecera válida en las primeras 20 líneas.");
-        return { prescripciones: [], errores: ['No se detectaron las columnas necesarias (Identificación, Medicamento).'] };
+        return { prescripciones: [], errores: ['No se encontró cabecera válida.'] };
     }
 
     const prescripciones: Prescripcion[] = [];
-    // Memoria para filas agrupadas (cuando el paciente solo aparece en la primera fila)
-    let ultimoPaciente: { id: string, nombre: string, ciudad: string } | null = null;
+    const listToUse = medicamentosDB.length > 0 ? medicamentosDB : MEDICAMENTOS_LIST;
+    console.log(`Iniciando parseo. Medicamentos disponibles en DB: ${listToUse.length}`);
+
+    // --- ESCANEO DE DATOS PARA DETECCIÓN DE COLUMNAS PRECISA ---
+    let autoAtcCol = -1;
+    let autoMedCol = -1;
+    let autoIdCol = -1;
+
+    // Escaneamos las primeras 50 filas buscando qué columna tiene códigos que SÍ están en nuestra DB
+    for (let k = headerRowIndex + 1; k < Math.min(lines.length, headerRowIndex + 50); k++) {
+        const row = parseCSVRow(lines[k], separator);
+        for (let idx = 0; idx < row.length; idx++) {
+            const val = (row[idx] || '').replace(/["']+/g, '').toUpperCase().trim();
+            if (!val) continue;
+
+            // Detectar ATC (Si coincide con DB)
+            if (autoAtcCol === -1 && listToUse.some(m => (m.atc || '').toUpperCase() === val)) {
+                autoAtcCol = idx;
+                console.log(`¡Columna ATC detectada! Es la Col ${idx} (Ej: ${val})`);
+            }
+
+            // Detectar Nombre Med (Si coincide con DB Y NO ES ATC)
+            if (autoMedCol === -1 && idx !== autoAtcCol && listToUse.some(m => (m.medicamento || '').toUpperCase() === val)) {
+                autoMedCol = idx;
+                console.log(`¡Columna MEDICAMENTO detectada! Es la Col ${idx} (Ej: ${val})`);
+            }
+
+            // Detectar ID (Si parece un número de cédula/documento de 7 a 12 dígitos)
+            if (autoIdCol === -1 && /^\d{7,12}$/.test(val)) {
+                autoIdCol = idx;
+                console.log(`¡Columna ID detectada! Es la Col ${idx} (Ej: ${val})`);
+            }
+        }
+        if (autoAtcCol !== -1 && autoMedCol !== -1 && autoIdCol !== -1) break;
+    }
+
+    // Asegurar que no colisionen en el fallback o mapeo final
+    const finalAtcIdx = autoAtcCol !== -1 ? autoAtcCol : (headerMap['atc'] ?? headerMap['codigo_atc'] ?? 27);
+    const finalMedIdx = autoMedCol !== -1 ? autoMedCol : (headerMap['medicamento'] ?? headerMap['descripcion'] ?? 28);
+
+    // Si no detectamos ID por dato, usamos el buscador de alias mejorado
+    const findIdIdx = () => {
+        if (autoIdCol !== -1) return autoIdCol;
+        for (const [h, idx] of Object.entries(headerMap)) {
+            if (ALIASES.id.some(a => h.includes(a))) return idx;
+        }
+        return 4; // Fallback extremo
+    };
+    const finalIdIdx = findIdIdx();
+
+    console.log(`MAPEADO FINAL -> ATC: Col ${finalAtcIdx}, MED: Col ${finalMedIdx}, ID: Col ${finalIdIdx}`);
+
+    // Stickiness: Guardar último paciente encontrado
+    let ultimoPaciente: any = null;
 
     for (let i = headerRowIndex + 1; i < lines.length; i++) {
         const fullRow = parseCSVRow(lines[i], separator);
@@ -92,102 +139,116 @@ export function parseCsvPrescripciones(csvText: string): {
 
         try {
             const getByAlias = (key: string): string => {
+                if (key === 'atc' && finalAtcIdx !== -1) return (fullRow[finalAtcIdx] || '').replace(/^"|"$/g, '').trim();
+                if (key === 'med' && finalMedIdx !== -1) return (fullRow[finalMedIdx] || '').replace(/^"|"$/g, '').trim();
+                if (key === 'id' && finalIdIdx !== -1) return (fullRow[finalIdIdx] || '').replace(/^"|"$|[^\d]/g, '').trim();
+
                 const candidates = ALIASES[key as keyof typeof ALIASES] || [key];
-                // 1. Intentar coincidencia exacta primero
                 for (const h of Object.keys(headerMap)) {
-                    if (candidates.some(c => h === c)) {
+                    if (candidates.some(c => h === c || h.includes(c))) {
                         const idx = headerMap[h];
-                        if (fullRow[idx]) return fullRow[idx].trim();
-                    }
-                }
-                // 2. Intentar coincidencia parcial
-                for (const h of Object.keys(headerMap)) {
-                    if (candidates.some(c => h.includes(c))) {
-                        const idx = headerMap[h];
-                        if (fullRow[idx]) return fullRow[idx].trim();
+                        if (fullRow[idx] !== undefined) {
+                            return String(fullRow[idx]).replace(/^"|"$/g, '').trim();
+                        }
                     }
                 }
                 return '';
             };
 
-            const medInput = getByAlias('med');
-            if (!medInput) {
-                if (i < headerRowIndex + 5) console.log(`Fila ${i}: No se encontró texto en columna de medicamento.`);
+            const idxNota = headerMap['nota'] ?? headerMap['numero_nota'] ?? headerMap['nro_nota'] ?? 0;
+            const notaVal = (fullRow[idxNota] || '').toString().replace(/^"|"$/g, '').trim();
+
+            const atcInputRaw = getByAlias('atc');
+            const atcInput = atcInputRaw.replace(/["']+/g, '').toUpperCase().trim();
+
+            const pMedRaw = getByAlias('med');
+            const pMedClean = pMedRaw.replace(/["']+/g, '').toUpperCase().trim();
+
+            const pId = getByAlias('id');
+            const pN1 = getByAlias('n1');
+
+            if (i <= headerRowIndex + 10) {
+                console.log(`Fila ${i} -> CSV ATC: "${atcInput}", Med: "${pMedClean}", PacienteID: "${pId}", Nombre: "${pN1}"`);
+            }
+
+            if (!atcInput && !pMedClean) continue;
+
+            // 1. INTENTO DE MATCH POR ATC
+            let finalMatch = listToUse.find(m => {
+                const dbAtc = (m.atc || '').toString().replace(/["']+/g, '').toUpperCase().trim();
+                return dbAtc !== '' && dbAtc === atcInput;
+            });
+
+            // 2. INTENTO DE MATCH POR NOMBRE (Fallback)
+            if (!finalMatch && pMedClean) {
+                finalMatch = listToUse.find(m => {
+                    const dbName = (m.medicamento || '').toUpperCase().trim();
+                    if (!dbName) return false;
+                    if (dbName === pMedClean || dbName.includes(pMedClean) || pMedClean.includes(dbName)) return true;
+                    const wordsInput = pMedClean.split(/[\s,xX*+()\-]+/).filter(w => w.length > 3);
+                    const wordsDB = dbName.split(/[\s,xX*+()\-]+/).filter(w => w.length > 3);
+                    const matches = wordsInput.filter(w => wordsDB.includes(w));
+                    return matches.length >= 2 || (matches.length === 1 && matches[0].length > 8);
+                });
+            }
+
+            if (!finalMatch) {
+                if (i <= headerRowIndex + 10) {
+                    console.log(`Fila ${i}: Sin coincidencia Técnica en DB Medicamentos.`);
+                }
                 continue;
             }
 
-            const medUpper = medInput.toUpperCase();
-            const configKeys = Object.keys(ConfiguracionTratamientos).filter(k => k !== 'default');
-            const foundMed = configKeys.find(k => medUpper.includes(k));
-
-            if (!foundMed) {
-                if (i < headerRowIndex + 5) console.log(`Fila ${i}: Medicamento '${medInput}' no está en la lista oficial.`);
-                continue;
+            // --- GESTIÓN DE PACIENTE (STICKY LOGIC) ---
+            if (pId && pN1) {
+                ultimoPaciente = {
+                    id: pId,
+                    n1: pN1,
+                    n2: getByAlias('n2'),
+                    a1: getByAlias('a1'),
+                    a2: getByAlias('a2'),
+                    tel: getByAlias('tel'),
+                    gen: getByAlias('gen'),
+                    ciudad: getByAlias('ciudad'),
+                    entidad: getByAlias('entidad'),
+                    dur: getByAlias('dur')
+                };
             }
 
-            // Datos del paciente
-            let pId = getByAlias('id');
-            let pN1 = getByAlias('n1');
-            let pN2 = getByAlias('n2');
-            let pA1 = getByAlias('a1');
-            let pA2 = getByAlias('a2');
-            let pCiudad = getByAlias('ciudad');
-            let pDpto = getByAlias('dpto'); // Mantener pDpto para la lógica de municipio
-            let pEps = getByAlias('eps');
-            let pDosis = getByAlias('dosis');
+            if (!ultimoPaciente) continue;
 
-            // Sticky Logic
-            if (!pId && ultimoPaciente) {
-                pId = ultimoPaciente.id;
-                pN1 = ultimoPaciente.nombre; // El nombre ya está completo
-                pCiudad = ultimoPaciente.ciudad;
-                pN2 = ''; pA1 = ''; pA2 = '';
-            }
-
-            if (!pId) {
-                if (i < headerRowIndex + 5) console.log(`Fila ${i}: No hay ID de paciente y no hay paciente previo.`);
-                continue;
-            }
-
-            // Construir nombre si es nuevo o si el nombre no es el del último paciente
-            let nombreFinal: string;
-            if (pN1.includes(' ') || (ultimoPaciente && pN1 === ultimoPaciente.nombre)) {
-                nombreFinal = pN1.toUpperCase();
-            } else {
-                nombreFinal = [pN1, pN2, pA1, pA2].filter(Boolean).join(' ').trim().toUpperCase();
-            }
-            if (!nombreFinal) nombreFinal = `PACIENTE_${pId}`;
-
-            // Guardar para la siguiente fila
-            ultimoPaciente = { id: pId, nombre: nombreFinal, ciudad: pCiudad };
+            const nombreFinal = [ultimoPaciente.n1, ultimoPaciente.n2, ultimoPaciente.a1, ultimoPaciente.a2].filter(Boolean).join(' ').trim().toUpperCase();
 
             prescripciones.push({
-                pacienteId: pId,
+                numeroNota: notaVal,
+                pacienteId: ultimoPaciente.id,
+                nombre1: ultimoPaciente.n1,
+                nombre2: ultimoPaciente.n2,
+                apellido1: ultimoPaciente.a1,
+                apellido2: ultimoPaciente.a2,
                 nombreCompleto: nombreFinal,
-                medicamento: foundMed,
-                dosis: pDosis || `Dosis según prescripción`,
-                eps: pEps || '',
-                municipio: pCiudad || pDpto,
-                diasAdministracion: getConfiguracionMedicamento(foundMed).diasEntrega,
-                diasDescanso: 0,
+                telefonos: ultimoPaciente.tel,
+                genero: ultimoPaciente.gen,
+                ciudadResidencia: ultimoPaciente.ciudad,
+                entidadAseguradora: ultimoPaciente.entidad,
+                atc: atcInput || (finalMatch.atc || ''),
+                medicamento: pMedClean || finalMatch.medicamento,
+                duracionTratamiento: ultimoPaciente.dur,
+                dosis: finalMatch.dosisEstandar || '',
+                municipio: ultimoPaciente.ciudad,
+                eps: ultimoPaciente.entidad,
+                diasAdministracion: finalMatch.diasAdministracion || 30,
+                diasDescanso: finalMatch.diasDescanso || 0,
             });
         } catch (e) {
-            console.warn("Fila ignorada:", i, e);
+            console.warn("Error en fila:", i, e);
         }
     }
 
-    console.log("Proceso terminado. Prescripciones válidas encontradas:", prescripciones.length);
+    console.log("Carga completada. Prescripciones válidas:", prescripciones.length);
     return { prescripciones, errores };
 }
 
-/** Mapea nombres de columna alternativas al índice en el CSV */
-function buildHeaderMap(headers: string[]): Record<string, number> {
-    const map: Record<string, number> = {};
-    headers.forEach((h, i) => { map[h] = i; });
-    return map;
-}
-
-/** Parsea una línea CSV respetando comillas y el separador detectado. */
 function parseCSVRow(line: string, separator: string = ','): string[] {
     const result: string[] = [];
     let current = '';
@@ -206,14 +267,6 @@ function parseCSVRow(line: string, separator: string = ','): string[] {
     return result;
 }
 
-// ─── Generador de Hoja de Ruta ────────────────────────────────────────────────
-
-/**
- * Genera entregas proyectadas para los próximos 6 meses a partir de:
- *   1. La configuración de periodicidad del medicamento
- *   2. La periodicidad histórica del paciente (si existe en `pacientes`)
- *   3. La periodicidad explícita del CSV (si viene en la prescripción)
- */
 export function generarHojaRuta(
     prescripciones: Prescripcion[],
     pacientes: Paciente[] = [],
@@ -223,119 +276,79 @@ export function generarHojaRuta(
     const hoy = new Date();
 
     for (const rx of prescripciones) {
-        // Buscar paciente existente por ID o nombre
-        const pacienteExistente = pacientes.find(p =>
-            p.numeroId === rx.pacienteId ||
-            normalizar(p.nombreCompleto) === normalizar(rx.nombreCompleto)
-        );
-
-        // Determinar periodicidad en días
-        let diasCiclo = rx.periodicidadDias; // 1. Explícito en CSV
-
-        if (!diasCiclo && pacienteExistente) {
-            // 2. Inferir desde historial de entregas del paciente
-            diasCiclo = inferirPeriodicidadHistorica(pacienteExistente);
-        }
-
-        if (!diasCiclo) {
-            // 3. Usar tabla de configuración
-            const config = getConfiguracionMedicamento(rx.medicamento);
-            diasCiclo = config.diasEntrega;
-        }
-
         const config = getConfiguracionMedicamento(rx.medicamento);
-        const ciclo = config.ciclo;
+        const diasCiclo = rx.periodicidadDias || config.diasEntrega || 30;
 
-        // Fecha de inicio: start of next month
-        let fechaEntrega = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+        let fechaEntrega = new Date(hoy);
         fechaEntrega.setDate(fechaEntrega.getDate() + diasCiclo);
 
         const fechaLimite = new Date(hoy);
         fechaLimite.setMonth(fechaLimite.getMonth() + mesesProyeccion);
 
         while (fechaEntrega <= fechaLimite) {
-            const fechaIso = fechaToIso(fechaEntrega);
-            const id = `${rx.pacienteId}_${fechaIso.replace(/-/g, '')}_${rx.medicamento.slice(0, 6)}`;
-
+            const fechaIso = fechaEntrega.toISOString().split('T')[0];
             despachos.push({
-                id,
+                id: `${rx.pacienteId}_${fechaIso.replace(/-/g, '')}_${rx.atc}`,
+                numeroNota: rx.numeroNota,
                 pacienteId: rx.pacienteId,
+                nombre1: rx.nombre1,
+                nombre2: rx.nombre2,
+                apellido1: rx.apellido1,
+                apellido2: rx.apellido2,
                 nombreCompleto: rx.nombreCompleto,
+                telefonos: rx.telefonos,
+                genero: rx.genero,
+                ciudadResidencia: rx.ciudadResidencia,
+                entidadAseguradora: rx.entidadAseguradora,
+                atc: rx.atc,
                 medicamento: rx.medicamento,
+                duracionTratamiento: rx.duracionTratamiento,
                 eps: rx.eps,
                 municipio: rx.municipio,
                 dosis: rx.dosis,
-                ciclo,
+                ciclo: config.ciclo,
                 diasEntrega: diasCiclo,
                 fechaProgramada: fechaIso,
                 confirmado: false,
             });
-
-            // Siguiente entrega
-            const siguiente = new Date(fechaEntrega);
-            siguiente.setDate(siguiente.getDate() + diasCiclo);
-            fechaEntrega = siguiente;
+            fechaEntrega.setDate(fechaEntrega.getDate() + diasCiclo);
         }
     }
 
-    // Ordenar por fecha
-    despachos.sort((a, b) => a.fechaProgramada.localeCompare(b.fechaProgramada));
-    return despachos;
+    return despachos.sort((a, b) => a.fechaProgramada.localeCompare(b.fechaProgramada));
 }
 
-/**
- * Infiere la periodicidad media de entrega a partir del historial de entregas
- * del paciente (campo `entregas` en Paciente).
- * Retorna días estimados o undefined si no se puede calcular.
- */
-export function inferirPeriodicidadHistorica(paciente: Paciente): number | undefined {
-    const mesesConEntrega = Object.values(paciente.entregas).filter(Boolean).length;
-    if (mesesConEntrega < 2) return undefined;
-    // Aproximación: si tiene N entregas en M meses → ciclo = M/N meses * 30
-    return Math.round((12 / mesesConEntrega) * 30);
-}
-
-/**
- * Genera una hoja de ruta directamente desde los pacientes existentes
- * (sin necesidad de CSV), usando el medicamento y periodicidad de cada uno.
- */
 export function generarHojaRutaDesdePacientes(
     pacientes: Paciente[],
     mesesProyeccion: number = 6
 ): Despacho[] {
     const prescripciones: Prescripcion[] = pacientes
-        .filter(p => p.estado.startsWith('AC'))
-        .map(p => {
-            const config = getConfiguracionMedicamento(p.medicamento);
-            return {
-                pacienteId: p.numeroId || String(p.id),
-                nombreCompleto: p.nombreCompleto,
-                medicamento: p.medicamento,
-                dosis: p.dosisEstandar,
-                eps: p.eps,
-                municipio: p.municipio,
-                diasAdministracion: config.diasEntrega,
-                diasDescanso: 0,
-            };
-        });
+        .filter(p => (p.estado || '').startsWith('AC'))
+        .map(p => ({
+            pacienteId: p.numeroId || String(p.id),
+            numeroNota: '',
+            nombre1: p.nombreCompleto.split(' ')[0] || '',
+            nombre2: '',
+            apellido1: p.nombreCompleto.split(' ')[1] || '',
+            apellido2: '',
+            nombreCompleto: p.nombreCompleto,
+            telefonos: '',
+            genero: '',
+            ciudadResidencia: p.municipio,
+            entidadAseguradora: p.eps,
+            atc: '',
+            medicamento: p.medicamento,
+            duracionTratamiento: 'Indefinido',
+            dosis: p.dosisEstandar,
+            municipio: p.municipio,
+            eps: p.eps,
+            diasAdministracion: 30,
+            diasDescanso: 0,
+        }));
 
     return generarHojaRuta(prescripciones, pacientes, mesesProyeccion);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fechaToIso(fecha: Date): string {
-    const y = fecha.getFullYear();
-    const m = String(fecha.getMonth() + 1).padStart(2, '0');
-    const d = String(fecha.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-}
-
-function normalizar(s: string): string {
-    return s.toUpperCase().trim().replace(/\s+/g, ' ');
-}
-
-/** Formatea una fecha ISO como string legible en español */
 export function formatFechaEntrega(isoDate: string): string {
     const [year, month, day] = isoDate.split('-').map(Number);
     const fecha = new Date(year, month - 1, day);
@@ -347,7 +360,6 @@ export function formatFechaEntrega(isoDate: string): string {
     });
 }
 
-/** Determina si una fecha de entrega es urgente (dentro de 7 días) */
 export function esEntregaUrgente(isoDate: string): boolean {
     const hoy = new Date();
     const [y, m, d] = isoDate.split('-').map(Number);
@@ -357,7 +369,6 @@ export function esEntregaUrgente(isoDate: string): boolean {
     return diffDays >= 0 && diffDays <= 7;
 }
 
-/** Determina si una entrega está vencida (fecha pasada y no confirmada) */
 export function esEntregaVencida(despacho: Despacho): boolean {
     if (despacho.confirmado) return false;
     const hoy = new Date();
