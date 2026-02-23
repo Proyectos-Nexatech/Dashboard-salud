@@ -1,6 +1,4 @@
-// =============================================
-// Tipos y configuración para el módulo de
-// Gestión de Entregas / Control de Despachos
+// Gestión de Entregas
 // =============================================
 
 // --- INTERFACES ---

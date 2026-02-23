@@ -20,6 +20,7 @@ export interface EntidadInfo {
     tipo: 'EPS-S' | 'EPS-C' | 'Otro';
     nit?: string;
     activo: boolean;
+    contrato: boolean;
 }
 
 /**
@@ -91,7 +92,8 @@ export async function seedEntidadesFromMock(): Promise<void> {
             const entidad: EntidadInfo = {
                 nombre: name.toUpperCase(),
                 tipo: 'EPS-S',
-                activo: true
+                activo: true,
+                contrato: true
             };
             batch.set(ref, entidad);
         });

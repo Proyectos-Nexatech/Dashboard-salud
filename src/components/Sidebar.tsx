@@ -13,7 +13,7 @@ const navItems = [
     { id: 'pacientes', icon: Users, label: 'Pacientes' },
     { id: 'medicamentos', icon: Pill, label: 'Medicamentos' },
     { id: 'entidades', icon: Building2, label: 'Entidades' },
-    { id: 'despachos', icon: PackageCheck, label: 'Control Despachos' },
+    { id: 'despachos', icon: PackageCheck, label: 'Control de Entregas' },
     { id: 'reportes', icon: FileText, label: 'Reportes' },
     { id: 'riesgos', icon: AlertTriangle, label: 'Riesgos' },
 ];

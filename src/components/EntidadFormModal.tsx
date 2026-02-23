@@ -13,7 +13,8 @@ const INITIAL_FORM: EntidadInfo = {
     nombre: '',
     tipo: 'EPS-S',
     nit: '',
-    activo: true
+    activo: true,
+    contrato: true
 };
 
 export default function EntidadFormModal({ isOpen, onClose, onSave, entidad }: EntidadFormModalProps) {
@@ -125,17 +126,31 @@ export default function EntidadFormModal({ isOpen, onClose, onSave, entidad }: E
                             </div>
                         </div>
 
-                        <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-                            <input
-                                type="checkbox"
-                                id="activo"
-                                style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--primary)' }}
-                                checked={form.activo}
-                                onChange={e => handleChange('activo', e.target.checked)}
-                            />
-                            <label htmlFor="activo" style={{ fontSize: 14, cursor: 'pointer', fontWeight: 500, color: 'var(--text-main)' }}>
-                                Entidad Activa (aparecerá en los filtros y formularios)
-                            </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 8 }}>
+                            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <input
+                                    type="checkbox"
+                                    id="activo"
+                                    style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--primary)' }}
+                                    checked={form.activo}
+                                    onChange={e => handleChange('activo', e.target.checked)}
+                                />
+                                <label htmlFor="activo" style={{ fontSize: 14, cursor: 'pointer', fontWeight: 500, color: 'var(--text-main)' }}>
+                                    Entidad Activa
+                                </label>
+                            </div>
+                            <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <input
+                                    type="checkbox"
+                                    id="contrato"
+                                    style={{ width: 18, height: 18, cursor: 'pointer', accentColor: 'var(--primary)' }}
+                                    checked={form.contrato}
+                                    onChange={e => handleChange('contrato', e.target.checked)}
+                                />
+                                <label htmlFor="contrato" style={{ fontSize: 14, cursor: 'pointer', fontWeight: 500, color: 'var(--text-main)' }}>
+                                    Tiene Contrato (SI/NO)
+                                </label>
+                            </div>
                         </div>
                     </div>
 

@@ -30,7 +30,7 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     simulacion: { title: 'Simulación de Escenarios', subtitle: 'Modelado de estrategias de mitigación' },
     reportes: { title: 'Reportes e Indicadores', subtitle: 'Matriz de control operativo diario' },
     entidades: { title: 'Gestión de Entidades / EPS', subtitle: 'Administración de entidades promotoras de salud' },
-    despachos: { title: 'Control de Despachos', subtitle: 'Gestión de hoja de ruta y confirmación de entregas' },
+    despachos: { title: 'Control de Entregas', subtitle: 'Gestión de hoja de ruta y confirmación de entregas' },
     configuracion: { title: 'Configuración', subtitle: 'Ajustes del sistema' },
 };
 

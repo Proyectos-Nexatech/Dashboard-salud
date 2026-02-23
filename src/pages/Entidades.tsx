@@ -257,6 +257,7 @@ export default function Entidades({
                                 {([
                                     { key: 'nombre', label: 'Nombre Entidad' },
                                     { key: 'nit', label: 'NIT' },
+                                    { key: 'contrato', label: 'Contrato' },
                                     { key: 'tipo', label: 'Tipo' },
                                     { key: 'activo', label: 'Estado' },
                                 ] as { key: string; label: string }[]).map(col => (
@@ -268,10 +269,10 @@ export default function Entidades({
                                             userSelect: 'none',
                                             color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
                                             whiteSpace: 'nowrap',
-                                            textAlign: (col.key === 'tipo' || col.key === 'activo') ? 'center' : 'left'
+                                            textAlign: (col.key === 'tipo' || col.key === 'activo' || col.key === 'contrato') ? 'center' : 'left'
                                         }}
                                     >
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: (col.key === 'tipo' || col.key === 'activo') ? 'center' : 'flex-start' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: (col.key === 'tipo' || col.key === 'activo' || col.key === 'contrato') ? 'center' : 'flex-start' }}>
                                             {col.label}
                                             {sortIcon(col.key)}
                                         </div>
@@ -297,6 +298,15 @@ export default function Entidades({
                                             {e.nombre}
                                         </td>
                                         <td style={{ fontSize: 13, color: 'var(--gray-600)' }}>{e.nit || '---'}</td>
+                                        <td style={{ textAlign: 'center' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                                                {e.contrato ? (
+                                                    <><CheckCircle size={14} color="#16a34a" /> <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 600 }}>SÍ</span></>
+                                                ) : (
+                                                    <><XCircle size={14} color="#dc2626" /> <span style={{ color: '#dc2626', fontSize: 12, fontWeight: 600 }}>NO</span></>
+                                                )}
+                                            </div>
+                                        </td>
                                         <td style={{ textAlign: 'center' }}>
                                             <span style={{
                                                 padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
