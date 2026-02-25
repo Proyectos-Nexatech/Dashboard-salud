@@ -19,7 +19,7 @@ const initialPaciente: Omit<Paciente, 'id'> = {
     estado: 'AC ONC' as EstadoCode,
     medicamento: '', presentacionComercial: '', dosisEstandar: '',
     diasAdministracion: 30, diasDescanso: 0, entregas: {},
-    tipoPaciente: undefined
+    servicio: ''
 };
 
 export default function PacienteFormModal({ isOpen, onClose, onSave, paciente, epsList }: PacienteFormModalProps) {
@@ -256,6 +256,10 @@ export default function PacienteFormModal({ isOpen, onClose, onSave, paciente, e
                             <label style={labelStyle}>Entidad</label>
                             <input type="text" style={fieldStyle('entidad')} value={form.entidad || ''} onChange={e => handleChange('entidad', e.target.value)} placeholder="Ej: ENTIDAD DE SALUD" />
                         </div>
+                        <div>
+                            <label style={labelStyle}>Servicio</label>
+                            <input type="text" style={fieldStyle('servicio')} value={form.servicio || ''} onChange={e => handleChange('servicio', e.target.value.toUpperCase())} placeholder="Ej: ONCOLOGÍA" />
+                        </div>
                     </div>
 
                     {/* Section: Tratamiento */}
@@ -290,50 +294,41 @@ export default function PacienteFormModal({ isOpen, onClose, onSave, paciente, e
                             <label style={labelStyle}>Días Descanso</label>
                             <input type="number" style={{ ...fieldStyle('diasDescanso'), background: 'var(--gray-50)' }} value={form.diasDescanso || 0} readOnly />
                         </div>
-                        <div style={{ gridColumn: '1 / -1' }}>
-                            <label style={labelStyle}>Tipo de Paciente</label>
-                            <select style={fieldStyle('tipoPaciente')} value={form.tipoPaciente || ''} onChange={e => handleChange('tipoPaciente', e.target.value)}>
-                                <option value="">Seleccionar tipo...</option>
-                                <option value="MONOTERAPIA">MONOTERAPIA</option>
-                                <option value="HIBRIDO">HIBRIDO</option>
-                                <option value="QUIMITERAPIA">QUIMITERAPIA</option>
-                            </select>
-                        </div>
                     </div>
-
-                    {/* Error summary */}
-                    {Object.keys(errors).length > 0 && (
-                        <div style={{
-                            marginTop: 16, padding: '12px 16px', background: '#fef2f2',
-                            border: '1px solid #fecaca', borderRadius: 12, fontSize: 13, color: '#dc2626'
-                        }}>
-                            ⚠️ Por favor completa los campos obligatorios marcados con *
-                        </div>
-                    )}
                 </div>
 
-                {/* Footer */}
-                <div style={{
-                    padding: '16px 28px', background: 'var(--gray-50)',
-                    borderTop: '1px solid var(--gray-100)', display: 'flex',
-                    justifyContent: 'flex-end', gap: 12,
-                    borderBottomLeftRadius: 24, borderBottomRightRadius: 24
+                {/* Error summary */}
+                {Object.keys(errors).length > 0 && (
+                    <div style={{
+                        marginTop: 16, padding: '12px 16px', background: '#fef2f2',
+                        border: '1px solid #fecaca', borderRadius: 12, fontSize: 13, color: '#dc2626'
+                    }}>
+                        ⚠️ Por favor completa los campos obligatorios marcados con *
+                    </div>
+                )}
+            </div>
+
+            {/* Footer */}
+            <div style={{
+                padding: '16px 28px', background: 'var(--gray-50)',
+                borderTop: '1px solid var(--gray-100)', display: 'flex',
+                justifyContent: 'flex-end', gap: 12,
+                borderBottomLeftRadius: 24, borderBottomRightRadius: 24
+            }}>
+                <button onClick={onClose} style={{
+                    padding: '10px 24px', background: 'white',
+                    border: '1px solid var(--gray-300)', borderRadius: 12,
+                    cursor: 'pointer', fontWeight: 600, fontSize: 14
                 }}>
-                    <button onClick={onClose} style={{
-                        padding: '10px 24px', background: 'white',
-                        border: '1px solid var(--gray-300)', borderRadius: 12,
-                        cursor: 'pointer', fontWeight: 600, fontSize: 14
-                    }}>
-                        Cancelar
-                    </button>
-                    <button onClick={handleSubmit} disabled={saving} className="btn-primary" style={{
-                        padding: '10px 28px', borderRadius: 12,
-                        fontWeight: 600, fontSize: 14,
-                        opacity: saving ? 0.7 : 1, cursor: saving ? 'not-allowed' : 'pointer'
-                    }}>
-                        {saving ? 'Guardando...' : (isEdit ? 'Guardar Cambios' : 'Crear Paciente')}
-                    </button>
-                </div>
+                    Cancelar
+                </button>
+                <button onClick={handleSubmit} disabled={saving} className="btn-primary" style={{
+                    padding: '10px 28px', borderRadius: 12,
+                    fontWeight: 600, fontSize: 14,
+                    opacity: saving ? 0.7 : 1, cursor: saving ? 'not-allowed' : 'pointer'
+                }}>
+                    {saving ? 'Guardando...' : (isEdit ? 'Guardar Cambios' : 'Crear Paciente')}
+                </button>
             </div>
         </div>
     );

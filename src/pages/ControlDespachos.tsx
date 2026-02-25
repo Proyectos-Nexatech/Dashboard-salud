@@ -1,124 +1,53 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
     PackageCheck, Upload, CheckCircle2, Clock, AlertTriangle,
-    Search, Filter, ChevronDown, RefreshCw, Trash2, X, FileText,
-    Calendar, User, Pill, MapPin, TrendingUp, BarChart2, ChevronLeft, ChevronRight,
-    XCircle, PauseCircle, RotateCcw
+    Search, Filter, ChevronDown, Trash2, X, Download, Plus,
+    ArrowUpRight, Truck, Info, MoreVertical, Map as MapIcon, ShieldCheck, Phone,
+    Package, TrendingUp, BarChart as BarChart2, Calendar, User, Pill, ChevronLeft, ChevronRight,
+    MapPin as MapPinIcon, XCircle, RotateCcw, Stethoscope, ClipboardList
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useDespachos } from '../context/DespachoContext';
 import type { Despacho } from '../data/despachoTypes';
 import type { Paciente } from '../data/mockData';
 import {
     parseCsvPrescripciones,
     generarHojaRuta,
-    generarHojaRutaDesdePacientes,
     formatFechaEntrega,
     esEntregaUrgente,
     esEntregaVencida,
+    getGrupoBRescate
 } from '../utils/despachoUtils';
 import {
     addDespachos,
     confirmarDespacho as confirmarDespachoFS,
     eliminarTodosLosDespachos,
     actualizarEstadoDespacho,
+    sincronizarHojaRutaConFirestore,
+    gestionarRescate,
+    agendarSeguimiento,
+    registrarRespuestaTratamiento
 } from '../services/despachoService';
 import DespachoCalendar from '../components/DespachoCalendar';
+import ConfirmModal from '../components/ConfirmModal';
 import type { MedicamentoInfo } from '../data/medicamentosData';
+import { upsertPatientsFromPrescripciones } from '../services/patientService';
+import DeliveryEvidence from '../components/DeliveryEvidence';
+import DeliveryTimeline from '../components/DeliveryTimeline';
+import { generateDeliveryReceipt } from '../utils/receiptGenerator';
+import EstadoBadge from '../components/EstadoBadge';
+import RecallManagementModal from '../components/RecallManagementModal';
+import FollowUpSchedulingModal from '../components/FollowUpSchedulingModal';
+import TreatmentResponseModal from '../components/TreatmentResponseModal';
+
 
 interface ControlDespachosProps {
     pacientes: Paciente[];
     medicamentos: MedicamentoInfo[];
-    despachos: Despacho[];
     onRefresh?: () => void;
 }
 
 type FiltroEstado = 'todos' | 'pendientes' | 'agendados' | 'entregados' | 'vencidos' | 'urgentes' | 'cancelados' | 'pospuestos';
-
-// ─── Badge de estado ──────────────────────────────────────────────────────────
-
-function EstadoBadge({ despacho }: { despacho: Despacho }) {
-    const estado = despacho.estadoActual || (despacho.confirmado ? 'Entregado' : 'Pendiente');
-
-    if (estado === 'Entregado') {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#dcfce7', color: '#15803d', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <CheckCircle2 size={12} />Entregado
-            </span>
-        );
-    }
-
-    if (estado === 'Agendado') {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#e0f2fe', color: '#0369a1', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <Calendar size={12} />Agendado
-            </span>
-        );
-    }
-
-    if (estado === 'Cancelado') {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#fee2e2', color: '#dc2626', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <XCircle size={12} />Cancelado
-            </span>
-        );
-    }
-
-    if (estado === 'Pospuesto') {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#fef3c7', color: '#b45309', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <RotateCcw size={12} />Pospuesto
-            </span>
-        );
-    }
-
-    // Si es Pendiente (o no tiene estadoActual definido), evaluamos vencimiento/urgencia
-    if (esEntregaVencida(despacho)) {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#fee2e2', color: '#dc2626', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <AlertTriangle size={12} />Vencido
-            </span>
-        );
-    }
-    if (esEntregaUrgente(despacho.fechaProgramada)) {
-        return (
-            <span style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#fef3c7', color: '#b45309', padding: '3px 10px',
-                borderRadius: 20, fontSize: 11, fontWeight: 700
-            }}>
-                <AlertTriangle size={12} />Urgente
-            </span>
-        );
-    }
-    return (
-        <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            background: '#eff6ff', color: '#2563eb', padding: '3px 10px',
-            borderRadius: 20, fontSize: 11, fontWeight: 700
-        }}>
-            <Clock size={12} />Pendiente
-        </span>
-    );
-}
 
 // ─── KPI Card ─────────────────────────────────────────────────────────────────
 
@@ -148,7 +77,9 @@ function KpiCard({ icon, label, value, sub, color }: {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export default function ControlDespachos({ pacientes, medicamentos, despachos, onRefresh }: ControlDespachosProps) {
+export default function ControlDespachos({ pacientes, medicamentos, onRefresh }: ControlDespachosProps) {
+    const { user } = useAuth();
+    const { despachos } = useDespachos();
     const fileRef = useRef<HTMLInputElement>(null);
     const [loading, setLoading] = useState(false);
     const [feedback, setFeedback] = useState<{ tipo: 'ok' | 'error' | 'info'; msg: string } | null>(null);
@@ -160,7 +91,7 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
     const [actionValue, setActionValue] = useState('');
     const [actionDate, setActionDate] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(0);
+    const [syncProgress, setSyncProgress] = useState(0);
     const [busqueda, setBusqueda] = useState('');
     const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>('todos');
     const [filtroCiclo, setFiltroCiclo] = useState('');
@@ -168,16 +99,53 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
     const [dragOver, setDragOver] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [showCalendar, setShowCalendar] = useState(false);
+
+    // --- HOME DELIVERY MODULE STATE ---
+    const [deliveryModality, setDeliveryModality] = useState<'Farmacia' | 'Domicilio' | null>(null);
+    const [domicilioVerificado, setDomicilioVerificado] = useState(false);
+    const [deliveryStep, setDeliveryStep] = useState(0); // 0: Selection, 1: Verification, 2: Tracking/Timeline, 3: Evidence
+    const [evidenceData, setEvidenceData] = useState<string | null>(null);
+    const [geoData, setGeoData] = useState<{ lat: number; lng: number } | null>(null);
+
+    // Recall State
+    const [recallModal, setRecallModal] = useState<{ isOpen: boolean; despacho: Despacho | null }>({
+        isOpen: false,
+        despacho: null
+    });
+
+    // Follow-up State
+    const [followUpModal, setFollowUpModal] = useState<{ isOpen: boolean; despacho: Despacho | null }>({
+        isOpen: false,
+        despacho: null
+    });
+    const [responseModal, setResponseModal] = useState<{ isOpen: boolean; despacho: Despacho | null }>({
+        isOpen: false,
+        despacho: null
+    });
+
     const [itemsPerPage, setItemsPerPage] = useState(10);
     const [sortCol, setSortCol] = useState<string | null>(null);
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void;
+        type?: 'danger' | 'success' | 'info';
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        type: 'info'
+    });
 
     // ── Estadísticas ──────────────────────────────────────────────────────────
     const stats = useMemo(() => {
         const total = despachos.length;
-        const entregados = despachos.filter(d => d.confirmado || d.estadoActual === 'Entregado').length;
+        const entregados = despachos.filter(d => d.confirmado || d.estadoActual?.includes('Entregado')).length;
         const vencidos = despachos.filter(d => esEntregaVencida(d)).length;
-        const urgentes = despachos.filter(d => !(d.confirmado || d.estadoActual === 'Entregado') && esEntregaUrgente(d.fechaProgramada)).length;
+        const urgentes = despachos.filter(d => !(d.confirmado || d.estadoActual?.includes('Entregado')) && esEntregaUrgente(d.fechaProgramada)).length;
         const adherencia = total > 0 ? Math.round((entregados / total) * 100) : 0;
         return { total, entregados, vencidos, urgentes, adherencia };
     }, [despachos]);
@@ -218,8 +186,6 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
 
             if (filtroEstado === 'cancelados' && estado !== 'Cancelado') return false;
             if (filtroEstado === 'pospuestos' && estado !== 'Pospuesto') return false;
-
-            return true;
 
             return true;
         });
@@ -294,18 +260,25 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                 mostrarFeedback('error', errores[0]);
                 return;
             }
-            setUploadProgress(1); // Inicia
-            const nuevosDespachos = generarHojaRuta(prescripciones, pacientes, 1);
-            await addDespachos(nuevosDespachos, (p) => setUploadProgress(p));
+            setSyncProgress(1); // Inicia
+            // Task: Update patient data (if doesn't exist)
+            await upsertPatientsFromPrescripciones(prescripciones, pacientes);
+
+            const nuevosDespachos = generarHojaRuta(prescripciones, pacientes, 6);
+            await sincronizarHojaRutaConFirestore(nuevosDespachos, (p) => setSyncProgress(p));
             mostrarFeedback('ok',
-                `✅ ${nuevosDespachos.length} entregas generadas desde ${prescripciones.length} prescripciones.` +
+                `✅ ${nuevosDespachos.length} entregas generadas y pacientes sincronizados.` +
                 (errores.length > 0 ? ` (${errores.length} advertencias)` : '')
             );
-            setUploadProgress(0);
+            setSyncProgress(0);
             onRefresh?.();
-        } catch (err) {
-            mostrarFeedback('error', 'Error al procesar el archivo CSV.');
-            console.error(err);
+        } catch (err: any) {
+            console.error("Error detallado:", err);
+            // Detectar si el error es de bloqueo por cliente (Adblock/Brave Shields)
+            const isBlocked = err.message?.includes('failed') || !navigator.onLine;
+            mostrarFeedback('error', isBlocked
+                ? 'Error de conexión. Por favor desactiva los "Brave Shields" o tu Bloqueador de Anuncios para este sitio.'
+                : 'Error al procesar el archivo CSV o subir a la base de datos.');
         } finally {
             setLoading(false);
             if (fileRef.current) fileRef.current.value = '';
@@ -324,23 +297,15 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
         if (file) procesarCsv(file);
     };
 
-    // ── Generar desde pacientes existentes ────────────────────────────────────
-    const generarDesdePacientes = async () => {
-        setLoading(true);
-        try {
-            setUploadProgress(1);
-            const nuevos = generarHojaRutaDesdePacientes(pacientes, 1);
-            await addDespachos(nuevos, (p) => setUploadProgress(p));
-            mostrarFeedback('ok', `✅ ${nuevos.length} entregas generadas desde ${pacientes.filter(p => p.estado.startsWith('AC')).length} pacientes activos.`);
-            setUploadProgress(0);
-            onRefresh?.();
-        } catch {
-            setUploadProgress(0);
-            mostrarFeedback('error', 'Error al generar la hoja de ruta.');
-        } finally {
-            setLoading(false);
-        }
-    };
+    const resetDeliveryFlow = useCallback(() => {
+        setDeliveryModality(null);
+        setDomicilioVerificado(false);
+        setDeliveryStep(0);
+        setEvidenceData(null);
+        setGeoData(null);
+        setActionModal(null);
+        setActionValue('');
+    }, []);
 
     // ── Confirmar despacho ────────────────────────────────────────────────────
     // Confirmación simple para agendar
@@ -352,30 +317,95 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
 
     const ejecutarAccion = async () => {
         if (!actionModal) return;
+
+        // --- LOGICA ESPECIAL PARA ENTREGAS ---
+        if (actionModal.type === 'Entregar') {
+            // Si es entrega y no hay modalidad elegida, no hacemos nada (el modal muestra la elección)
+            if (!deliveryModality) return;
+
+            // Si es domicilio y no está verificado, no avanzamos
+            if (deliveryModality === 'Domicilio' && deliveryStep === 1 && !domicilioVerificado) {
+                mostrarFeedback('error', 'Debes verificar el domicilio antes de continuar.');
+                return;
+            }
+
+            // Si estamos en el paso de evidencia y no hay evidencia
+            if (deliveryModality === 'Domicilio' && deliveryStep === 3 && !evidenceData) {
+                mostrarFeedback('error', 'Se requiere una evidencia (foto o firma) de la entrega.');
+                return;
+            }
+
+            // Si es domicilio y no es el último paso, avanzamos paso
+            if (deliveryModality === 'Domicilio' && deliveryStep < 3) {
+                setDeliveryStep(prev => prev + 1);
+                return;
+            }
+
+            // Si llegamos aquí, es confirmación final (o Farmacia o el último paso de Domicilio)
+        }
+
         if (!actionValue && (actionModal.type === 'Cancelar' || actionModal.type === 'Posponer')) {
             mostrarFeedback('error', 'Por favor completa la información requerida.');
             return;
         }
 
+        setConfirmModal({
+            isOpen: true,
+            title: `Confirmar ${actionModal.type}`,
+            message: `¿Está seguro que desea marcar esta entrega como ${actionModal.type.toUpperCase()}?`,
+            type: actionModal.type === 'Cancelar' ? 'danger' : 'info',
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                await procesarAccionConfirmada(actionModal, actionValue, actionDate);
+            }
+        });
+    };
+
+    const procesarAccionConfirmada = async (modal: { type: string, despacho: Despacho }, value: string, date: string) => {
         setActionLoading(true);
         try {
-            const { type, despacho } = actionModal;
+            const { type, despacho } = modal;
             if (!despacho.firestoreId) throw new Error('No FS ID');
 
             if (type === 'Posponer') {
-                await actualizarEstadoDespacho(despacho.firestoreId, 'Pospuesto', actionValue, actionDate);
+                await actualizarEstadoDespacho(despacho.firestoreId, 'Pospuesto', value, date, user?.email || 'Sistema');
             } else if (type === 'Cancelar') {
-                await actualizarEstadoDespacho(despacho.firestoreId, 'Cancelado', actionValue);
+                await actualizarEstadoDespacho(despacho.firestoreId, 'Cancelado', value, undefined, user?.email || 'Sistema');
             } else if (type === 'Agendar') {
-                await actualizarEstadoDespacho(despacho.firestoreId, 'Agendado', actionValue, actionDate);
+                await actualizarEstadoDespacho(despacho.firestoreId, 'Agendado', value, date, user?.email || 'Sistema');
             } else if (type === 'Entregar') {
-                await confirmarDespachoFS(despacho.firestoreId, actionValue, actionDate);
+                const finalEstado = deliveryModality === 'Domicilio' ? 'Entregado (Domicilio)' : 'Entregado (Farmacia)';
+
+                const extra: any = {
+                    modality: deliveryModality || 'Farmacia',
+                    domicilioVerificado,
+                    evidencia: evidenceData || '',
+                    estadoActual: finalEstado,
+                    timeline: [...(despacho.timeline || [])]
+                };
+
+                if (geoData) extra.geolocalizacion = geoData;
+
+                // Añadimos el hito final al timeline
+                extra.timeline?.push({
+                    hito: finalEstado,
+                    timestamp: new Date().toISOString(),
+                    usuario: user?.email || 'Sistema'
+                });
+
+                await confirmarDespachoFS(despacho.firestoreId, value, date, user?.email || 'Sistema', extra);
+
+                if (deliveryModality === 'Domicilio') {
+                    await generateDeliveryReceipt({ ...despacho, ...extra });
+                }
+
+                // TRIGGER MODAL DE SEGUIMIENTO AUTOMÁTICO
+                setFollowUpModal({ isOpen: true, despacho: { ...despacho, ...extra } });
             }
 
             mostrarFeedback('ok', `✅ Despacho ${type.toLowerCase()} con éxito.`);
             onRefresh?.();
-            setActionModal(null);
-            setActionValue('');
+            resetDeliveryFlow();
         } catch (err) {
             console.error(err);
             mostrarFeedback('error', 'Error al ejecutar la acción.');
@@ -385,21 +415,29 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
     };
 
     // ── Limpiar todo ──────────────────────────────────────────────────────────
-    const limpiarTodo = async () => {
-        if (!window.confirm('¿Deseas eliminar TODOS los despachos programados? Esta acción no se puede deshacer.')) return;
-        setLoading(true);
-        setUploadProgress(1);
-        try {
-            await eliminarTodosLosDespachos((p) => setUploadProgress(p));
-            mostrarFeedback('info', 'Todos los despachos han sido eliminados.');
-            setUploadProgress(0);
-            onRefresh?.();
-        } catch {
-            setUploadProgress(0);
-            mostrarFeedback('error', 'Error al eliminar los despachos.');
-        } finally {
-            setLoading(false);
-        }
+    const limpiarTodo = () => {
+        setConfirmModal({
+            isOpen: true,
+            title: 'Eliminar Despachos',
+            message: '¿Deseas eliminar TODOS los despachos programados? Esta acción no se puede deshacer.',
+            type: 'danger',
+            onConfirm: async () => {
+                setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                setLoading(true);
+                setSyncProgress(1);
+                try {
+                    await eliminarTodosLosDespachos((p) => setSyncProgress(p));
+                    mostrarFeedback('info', 'Todos los despachos han sido eliminados.');
+                    setSyncProgress(0);
+                    onRefresh?.();
+                } catch {
+                    setSyncProgress(0);
+                    mostrarFeedback('error', 'Error al eliminar los despachos.');
+                } finally {
+                    setLoading(false);
+                }
+            }
+        });
     };
 
     // ─── RENDER ───────────────────────────────────────────────────────────────
@@ -413,25 +451,59 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                     onConfirm={async (id, obs, fecha) => {
                         const d = despachos.find(x => x.id === id);
                         if (d?.firestoreId) {
-                            try {
-                                await confirmarDespachoFS(d.firestoreId, obs, fecha);
-                                mostrarFeedback('ok', '✅ Despacho confirmado desde el calendario.');
-                                onRefresh?.();
-                            } catch {
-                                mostrarFeedback('error', 'Error al confirmar desde el calendario.');
-                            }
+                            setConfirmModal({
+                                isOpen: true,
+                                title: 'Confirmar Entrega',
+                                message: '¿Está seguro de CONFIRMAR la entrega de este medicamento?',
+                                type: 'success',
+                                onConfirm: async () => {
+                                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    try {
+                                        await confirmarDespachoFS(d.firestoreId!, obs, fecha, user?.email || 'Sistema');
+                                        mostrarFeedback('ok', '✅ Despacho confirmado desde el calendario.');
+                                        onRefresh?.();
+                                    } catch {
+                                        mostrarFeedback('error', 'Error al confirmar desde el calendario.');
+                                    }
+                                }
+                            });
                         }
                     }}
                     onUpdateStatus={async (id, estado, motivo, fecha) => {
                         const d = despachos.find(x => x.id === id);
                         if (d?.firestoreId) {
-                            try {
-                                await actualizarEstadoDespacho(d.firestoreId, estado, motivo, fecha);
-                                mostrarFeedback('ok', `✅ Estado actualizado a ${estado} desde el calendario.`);
-                                onRefresh?.();
-                            } catch {
-                                mostrarFeedback('error', 'Error al actualizar estado desde el calendario.');
-                            }
+                            setConfirmModal({
+                                isOpen: true,
+                                title: 'Cambiar Estado',
+                                message: `¿Está seguro de cambiar el estado a ${(estado || '').toUpperCase()}?`,
+                                type: estado === 'Cancelado' ? 'danger' : 'info',
+                                onConfirm: async () => {
+                                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    try {
+                                        await actualizarEstadoDespacho(d.firestoreId!, estado, motivo, fecha, user?.email || 'Sistema');
+                                        mostrarFeedback('ok', `✅ Estado actualizado a ${estado} desde el calendario.`);
+                                        onRefresh?.();
+                                    } catch {
+                                        mostrarFeedback('error', 'Error al actualizar estado desde el calendario.');
+                                    }
+                                }
+                            });
+                        }
+                    }}
+                />
+            )}
+
+            {/* Recall Management Modal */}
+            {recallModal.isOpen && recallModal.despacho && (
+                <RecallManagementModal
+                    isOpen={recallModal.isOpen}
+                    despacho={recallModal.despacho}
+                    onClose={() => setRecallModal({ isOpen: false, despacho: null })}
+                    onSave={async (action, observation) => {
+                        if (recallModal.despacho?.firestoreId) {
+                            await gestionarRescate(recallModal.despacho.firestoreId, action, observation, user?.email || 'Sistema');
+                            mostrarFeedback('ok', `✅ Rescate gestionado: ${action}.`);
+                            onRefresh?.();
                         }
                     }}
                 />
@@ -500,15 +572,15 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                     <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleFileChange} />
                 </div>
 
-                {uploadProgress > 0 && (
+                {syncProgress > 0 && (
                     <div style={{ flex: '1 0 100%', maxWidth: 400, marginTop: 4 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                             <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>PROCESANDO ENTREGAS...</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>{uploadProgress}%</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#6366f1' }}>{syncProgress}%</span>
                         </div>
                         <div style={{ width: '100%', height: 6, background: '#f3f4f6', borderRadius: 10, overflow: 'hidden' }}>
                             <div style={{
-                                width: `${uploadProgress}%`, height: '100%',
+                                width: `${syncProgress}%`, height: '100%',
                                 background: 'linear-gradient(90deg, #6366f1, #a855f7)',
                                 transition: 'width 0.3s ease-out'
                             }} />
@@ -526,20 +598,6 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                     }}>
                     <Calendar size={16} />
                     CALENDARIO
-                </button>
-
-                <button
-                    onClick={generarDesdePacientes}
-                    disabled={loading}
-                    style={{
-                        padding: '12px 18px', borderRadius: 12, border: 'none',
-                        background: 'linear-gradient(135deg, #6366f1, #4f46e5)',
-                        color: 'white', cursor: loading ? 'not-allowed' : 'pointer',
-                        fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8,
-                        opacity: loading ? 0.7 : 1,
-                    }}>
-                    <RefreshCw size={15} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-                    Generar desde Pacientes
                 </button>
 
                 {despachos.length > 0 && (
@@ -669,6 +727,7 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                                             { key: 'eps', label: 'Entidad / Ciudad' },
                                             { key: 'ciclo', label: 'Ciclo / Duración' },
                                             { key: 'estado', label: 'Estado' },
+                                            { key: 'seguimiento', label: 'Seguimiento' },
                                             { key: null, label: 'Acciones' },
                                         ] as { key: string | null; label: string }[]).map(col => (
                                             <th
@@ -695,10 +754,20 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                                     {currentItems.map((d, i) => {
                                         const isVencido = esEntregaVencida(d);
                                         const isUrgente = esEntregaUrgente(d.fechaProgramada);
-                                        const rowBg = d.confirmado ? '#f0fdf4' : isVencido ? '#fff5f5' : isUrgente ? '#fffbeb' : i % 2 === 0 ? 'white' : '#fafafa';
+                                        const isRescue = getGrupoBRescate([d]).length > 0;
 
                                         return (
-                                            <tr key={d.id} style={{ background: rowBg, borderBottom: '1px solid var(--gray-100)', transition: 'background 0.2s' }}>
+                                            <tr
+                                                key={d.id}
+                                                style={{
+                                                    borderBottom: '1px solid var(--gray-100)',
+                                                    transition: 'background 0.2s',
+                                                    background: isRescue ? '#fffbeb' : 'transparent',
+                                                    boxShadow: isRescue ? 'inset 4px 0 0 #f59e0b' : 'none'
+                                                }}
+                                                onMouseEnter={(e) => (e.currentTarget.style.background = isRescue ? '#fef3c7' : '#f8fafc')}
+                                                onMouseLeave={(e) => (e.currentTarget.style.background = isRescue ? '#fffbeb' : 'transparent')}
+                                            >
                                                 <td style={{ padding: '11px 14px', whiteSpace: 'nowrap', textAlign: 'center' }}>
                                                     <div style={{ textAlign: 'center' }}>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: 7, justifyContent: 'center', marginBottom: 2 }}>
@@ -752,7 +821,7 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                                                     <div style={{ textAlign: 'left' }}>
                                                         <div style={{ fontWeight: 600, color: '#4f46e5', fontSize: 12 }}>{d.entidadAseguradora || d.eps || '—'}</div>
                                                         <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--gray-400)', justifyContent: 'flex-start' }}>
-                                                            <MapPin size={11} />{d.ciudadResidencia || d.municipio}
+                                                            <MapIcon size={11} />{d.ciudadResidencia || d.municipio}
                                                         </div>
                                                     </div>
                                                 </td>
@@ -775,6 +844,42 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                                                             </div>
                                                         )}
                                                     </div>
+                                                </td>
+                                                <td style={{ padding: '11px 14px', textAlign: 'center' }}>
+                                                    {(() => {
+                                                        const confirmada = d.confirmado || (d.estadoActual && d.estadoActual.includes('Entregado'));
+                                                        if (!confirmada) return <span style={{ color: '#94a3b8', fontSize: 10 }}>Falta Entrega</span>;
+
+                                                        const estado = d.seguimientoEstado || 'Pendiente';
+
+                                                        if (estado === 'Pendiente') {
+                                                            return (
+                                                                <button
+                                                                    onClick={() => setFollowUpModal({ isOpen: true, despacho: d })}
+                                                                    style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, margin: '0 auto' }}
+                                                                >
+                                                                    <Calendar size={12} /> Agendar
+                                                                </button>
+                                                            );
+                                                        }
+                                                        if (estado === 'Programado') {
+                                                            return (
+                                                                <button
+                                                                    onClick={() => setResponseModal({ isOpen: true, despacho: d })}
+                                                                    style={{ background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, margin: '0 auto' }}
+                                                                >
+                                                                    <Stethoscope size={12} /> Registrar
+                                                                </button>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                                                <span style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                                    <CheckCircle2 size={12} /> Efectuado
+                                                                </span>
+                                                            </div>
+                                                        );
+                                                    })()}
                                                 </td>
                                                 <td style={{ padding: '11px 14px', textAlign: 'center' }}>
                                                     {(() => {
@@ -814,6 +919,19 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                                                                     >
                                                                         Entregar
                                                                     </button>
+
+                                                                    {isRescue && (
+                                                                        <button
+                                                                            onClick={() => setRecallModal({ isOpen: true, despacho: d })}
+                                                                            style={{
+                                                                                padding: '6px 10px', borderRadius: 8, border: 'none',
+                                                                                background: '#f59e0b', color: 'white', cursor: 'pointer',
+                                                                                fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4
+                                                                            }}
+                                                                        >
+                                                                            <Phone size={12} /> Rescatar
+                                                                        </button>
+                                                                    )}
                                                                     <button
                                                                         onClick={() => {
                                                                             setActionModal({ type: 'Posponer', despacho: d });
@@ -918,132 +1036,409 @@ export default function ControlDespachos({ pacientes, medicamentos, despachos, o
                 )}
             </div>
 
-            {/* ═══ Modal de Acciones (Cancelar/Posponer/Suspender) ═══ */}
             {actionModal && (
                 <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9000,
-                    display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '120px 16px',
-                    backdropFilter: 'blur(4px)'
+                    position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.7)', zIndex: 9000,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+                    backdropFilter: 'blur(8px)'
                 }}>
                     <div style={{
-                        background: 'white', borderRadius: 24, padding: 32, width: '100%',
-                        maxWidth: 440, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-                        position: 'relative', animation: 'modalSlideUp 0.3s ease-out'
+                        background: 'white', borderRadius: 28, padding: 32, width: '100%',
+                        maxWidth: actionModal.type === 'Entregar' && deliveryModality === 'Domicilio' ? 520 : 440,
+                        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)',
+                        position: 'relative', animation: 'modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
+                        border: '1px solid rgba(255,255,255,0.1)'
                     }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                            <h3 style={{ fontSize: 20, fontWeight: 800, color: '#111827', margin: 0 }}>
-                                {actionModal.type} Entrega
-                            </h3>
-                            <button onClick={() => setActionModal(null)} style={{ background: '#f3f4f6', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 8, borderRadius: '50%', display: 'flex' }}>
-                                <X size={18} />
-                            </button>
-                        </div>
-
-                        <p style={{ fontSize: 14, color: '#4b5563', marginBottom: 24, lineHeight: 1.6 }}>
-                            {actionModal.type === 'Agendar' && 'Confirma que vas a agendar esta entrega para su seguimiento y gestión logística.'}
-                            {actionModal.type === 'Entregar' && 'Registra que el medicamento ha sido entregado satisfactoriamente al paciente.'}
-                            {actionModal.type === 'Cancelar' && 'Por favor, selecciona el motivo principal para cancelar esta entrega programada.'}
-                            {actionModal.type === 'Posponer' && 'Selecciona el motivo y la nueva fecha propuesta para realizar esta entrega.'}
-                        </p>
-
-                        <div style={{ marginBottom: 24 }}>
-                            {(actionModal.type === 'Agendar' || actionModal.type === 'Posponer' || actionModal.type === 'Entregar') && (
-                                <div style={{ marginBottom: 16 }}>
-                                    <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.05 }}>
-                                        Fecha de {actionModal.type === 'Entregar' ? 'Entrega' : actionModal.type === 'Agendar' ? 'Agendamiento' : 'Reprogramación'}
-                                    </label>
-                                    <input
-                                        type="date"
-                                        value={actionDate}
-                                        onChange={(e) => setActionDate(e.target.value)}
-                                        style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14 }}
-                                    />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <div style={{
+                                    width: 40, height: 40, borderRadius: 12,
+                                    background: actionModal.type === 'Cancelar' ? '#fee2e2' : '#f0f9ff',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    color: actionModal.type === 'Cancelar' ? '#dc2626' : '#0369a1'
+                                }}>
+                                    {actionModal.type === 'Entregar' ? <PackageCheck size={24} /> :
+                                        actionModal.type === 'Agendar' ? <Calendar size={24} /> : <AlertTriangle size={24} />}
                                 </div>
-                            )}
+                                <h3 style={{ fontSize: 22, fontWeight: 800, color: '#111827', margin: 0 }}>
+                                    {actionModal.type} Entrega
+                                </h3>
+                            </div>
+                            <button onClick={resetDeliveryFlow} style={{ background: '#f3f4f6', border: 'none', color: '#6b7280', cursor: 'pointer', padding: 8, borderRadius: '50%', display: 'flex', transition: 'all 0.2s' }}>
+                                <X size={20} />
+                            </button>
+                        </div>
 
-                            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.05 }}>
-                                {actionModal.type === 'Entregar' || actionModal.type === 'Agendar' ? 'Notas / Observaciones' : 'Motivo Requerido'}
-                            </label>
+                        {/* --- FLOW: ENTREGAR --- */}
+                        {actionModal.type === 'Entregar' ? (
+                            <div style={{ minHeight: 300, display: 'flex', flexDirection: 'column' }}>
 
-                            {actionModal.type === 'Cancelar' || actionModal.type === 'Posponer' ? (
-                                <select
-                                    value={actionValue}
-                                    onChange={e => setActionValue(e.target.value)}
-                                    style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, background: '#fff' }}
-                                >
-                                    <option value="">Seleccione una opción...</option>
-                                    {actionModal.type === 'Cancelar' ? (
-                                        <>
-                                            <option value="Paciente fallecido">Paciente fallecido</option>
-                                            <option value="Error en prescripción">Error en prescripción</option>
-                                            <option value="Duplicado">Duplicado</option>
-                                            <option value="Paciente trasladado">Paciente trasladado</option>
-                                            <option value="Paciente no requiere medicamento">Paciente no requiere medicamento</option>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <option value="Falta de inventario (Stock-out)">Falta de inventario (Stock-out)</option>
-                                            <option value="Dirección incorrecta">Dirección incorrecta</option>
-                                            <option value="Documentación incompleta">Documentación incompleta</option>
-                                            <option value="Paciente solicita pausa">Paciente solicita pausa</option>
-                                        </>
+                                {!deliveryModality ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '10px 0' }}>
+                                        <p style={{ fontSize: 14, color: '#4b5563', marginBottom: 10 }}>Selecciona el tipo de entrega que se realizará:</p>
+
+                                        <button
+                                            onClick={() => {
+                                                setDeliveryModality('Farmacia');
+                                                setActionDate(new Date().toISOString().split('T')[0]);
+                                            }}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 16, padding: '20px',
+                                                borderRadius: 16, border: '2px solid #e5e7eb', background: '#fff',
+                                                cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s'
+                                            }}
+                                            onMouseOver={e => e.currentTarget.style.borderColor = '#6366f1'}
+                                            onMouseOut={e => e.currentTarget.style.borderColor = '#e5e7eb'}
+                                        >
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#e0f2fe', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <ShieldCheck size={24} />
+                                            </div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 700, color: '#111827', fontSize: 15 }}>Entrega en Farmacia</div>
+                                                <div style={{ fontSize: 12, color: '#6b7280' }}>El paciente retira el medicamento en sede.</div>
+                                            </div>
+                                            <ChevronRight size={20} color="#9ca3af" />
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                setDeliveryModality('Domicilio');
+                                                setDeliveryStep(1);
+                                                setActionDate(new Date().toISOString().split('T')[0]);
+                                            }}
+                                            style={{
+                                                display: 'flex', alignItems: 'center', gap: 16, padding: '20px',
+                                                borderRadius: 16, border: '2px solid #e5e7eb', background: '#fff',
+                                                cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s'
+                                            }}
+                                            onMouseOver={e => e.currentTarget.style.borderColor = '#10b981'}
+                                            onMouseOut={e => e.currentTarget.style.borderColor = '#e5e7eb'}
+                                        >
+                                            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#dcfce7', color: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                <Truck size={24} />
+                                            </div>
+                                            <div style={{ flex: 1 }}>
+                                                <div style={{ fontWeight: 700, color: '#111827', fontSize: 15 }}>Entrega a Domicilio</div>
+                                                <div style={{ fontSize: 12, color: '#6b7280' }}>Envío certificado con trazabilidad y firma.</div>
+                                            </div>
+                                            <ChevronRight size={20} color="#9ca3af" />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Stepper for Home Delivery */}
+                                        {deliveryModality === 'Domicilio' && (
+                                            <DeliveryTimeline
+                                                events={actionModal.despacho.timeline || []}
+                                                currentStep={deliveryStep === 1 ? 'Despachado' : deliveryStep === 2 ? 'En Camino' : 'Entregado (Domicilio)'}
+                                            />
+                                        )}
+
+                                        <div style={{ flex: 1, padding: '10px 0' }}>
+                                            {/* Step 1: Verification */}
+                                            {deliveryModality === 'Domicilio' && deliveryStep === 1 && (
+                                                <div style={{ animation: 'fadeIn 0.3s' }}>
+                                                    <div style={{ background: '#f8fafc', padding: 20, borderRadius: 16, border: '1px solid #e2e8f0', marginBottom: 20 }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                                            <MapPinIcon size={18} color="#6366f1" />
+                                                            <span style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>VALIDACIÓN DE DIRECCIÓN</span>
+                                                        </div>
+                                                        <div style={{ fontSize: 15, fontWeight: 600, color: '#1e293b', marginBottom: 4 }}>{actionModal.despacho.nombreCompleto}</div>
+                                                        <div style={{ fontSize: 13, color: '#64748b' }}>Teléfono: <strong>{actionModal.despacho.telefonos}</strong></div>
+                                                        <div style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>Municipio: <strong>{actionModal.despacho.municipio}</strong></div>
+                                                    </div>
+
+                                                    {!domicilioVerificado ? (
+                                                        <button
+                                                            onClick={async () => {
+                                                                // Simulación de geolocalización
+                                                                if (navigator.geolocation) {
+                                                                    navigator.geolocation.getCurrentPosition((pos) => {
+                                                                        setGeoData({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                                                                    });
+                                                                }
+                                                                setDomicilioVerificado(true);
+                                                                // Actualizar estado a Despachado automáticamente
+                                                                await actualizarEstadoDespacho(actionModal.despacho.firestoreId!, 'Despachado', 'Logística iniciada', undefined, user?.email || 'Sistema', actionModal.despacho.timeline);
+                                                            }}
+                                                            style={{
+                                                                width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+                                                                background: '#6366f1', color: 'white', fontWeight: 700, fontSize: 14,
+                                                                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10
+                                                            }}
+                                                        >
+                                                            <ShieldCheck size={20} /> VERIFICAR Y DESPACHAR
+                                                        </button>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#16a34a', fontWeight: 700, justifyContent: 'center', padding: '10px' }}>
+                                                            <CheckCircle2 size={24} /> DOMICILIO VERIFICADO
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* Step 2: In Transit */}
+                                            {deliveryModality === 'Domicilio' && deliveryStep === 2 && (
+                                                <div style={{ animation: 'fadeIn 0.3s', textAlign: 'center', padding: '20px 0' }}>
+                                                    <Truck size={48} color="#6366f1" style={{ marginBottom: 16, opacity: 0.8 }} />
+                                                    <h4 style={{ margin: '0 0 8px', fontSize: 18, color: '#1e293b' }}>Pedido en Transporte</h4>
+                                                    <p style={{ fontSize: 14, color: '#64748b' }}>El repartidor está en camino a la dirección del paciente.</p>
+                                                    <button
+                                                        onClick={async () => {
+                                                            await actualizarEstadoDespacho(actionModal.despacho.firestoreId!, 'En Camino', 'Pedido en transporte', undefined, user?.email || 'Sistema', actionModal.despacho.timeline);
+                                                            setDeliveryStep(3);
+                                                        }}
+                                                        style={{
+                                                            marginTop: 20, width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+                                                            background: '#10b981', color: 'white', fontWeight: 700, cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        NOTIFICAR LLEGADA A DESTINO
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Step 3: Evidence (Photo/Image) */}
+                                            {deliveryModality === 'Domicilio' && deliveryStep === 3 && (
+                                                <div style={{ animation: 'fadeIn 0.3s' }}>
+                                                    {!evidenceData ? (
+                                                        <DeliveryEvidence
+                                                            onSave={(data) => setEvidenceData(data)}
+                                                            onCancel={() => setDeliveryStep(2)}
+                                                        />
+                                                    ) : (
+                                                        <div style={{ textAlign: 'center' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#16a34a', fontWeight: 700, justifyContent: 'center', marginBottom: 16 }}>
+                                                                <CheckCircle2 size={24} /> EVIDENCIA CAPTURADA
+                                                            </div>
+                                                            <img
+                                                                src={evidenceData}
+                                                                alt="Evidencia"
+                                                                onClick={() => setEvidenceData(null)}
+                                                                style={{ maxWidth: '100%', height: 160, objectFit: 'cover', border: '1px solid #e2e8f0', borderRadius: 12, background: '#f8fafc', cursor: 'pointer' }}
+                                                            />
+                                                            <button
+                                                                onClick={() => setEvidenceData(null)}
+                                                                style={{ display: 'block', margin: '10px auto', background: 'none', border: 'none', color: '#6366f1', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                                                            >
+                                                                CAMBIAR IMAGEN
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {/* Farmacia Flow: Simple Remarks */}
+                                            {deliveryModality === 'Farmacia' && (
+                                                <div style={{ animation: 'fadeIn 0.3s' }}>
+                                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.05 }}>
+                                                        Observaciones de la Entrega
+                                                    </label>
+                                                    <textarea
+                                                        placeholder="Añade notas sobre el retiro en farmacia..."
+                                                        value={actionValue}
+                                                        onChange={e => setActionValue(e.target.value)}
+                                                        style={{ width: '100%', minHeight: 120, padding: '14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, resize: 'none', fontFamily: 'inherit' }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
+                                            <button
+                                                onClick={() => {
+                                                    if (deliveryStep > 1) setDeliveryStep(prev => prev - 1);
+                                                    else setDeliveryModality(null);
+                                                }}
+                                                style={{ flex: 1, padding: '12px', borderRadius: 12, border: '1.5px solid #e5e7eb', background: 'white', color: '#4b5563', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                                            >
+                                                Regresar
+                                            </button>
+                                            <button
+                                                onClick={ejecutarAccion}
+                                                disabled={actionLoading || (deliveryModality === 'Domicilio' && deliveryStep === 1 && !domicilioVerificado) || (deliveryStep === 3 && !evidenceData)}
+                                                style={{
+                                                    flex: 2, padding: '12px', borderRadius: 12, border: 'none',
+                                                    background: '#16a34a', color: 'white', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                                                    opacity: (actionLoading) ? 0.7 : 1
+                                                }}
+                                            >
+                                                {actionLoading ? 'Procesando...' :
+                                                    deliveryModality === 'Domicilio' && deliveryStep < 3 ? 'Siguiente Paso' : 'Confirmar Entrega'}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        ) : (
+                            /* --- FLOW: OTROS (Agendar, Posponer, Cancelar) --- */
+                            <>
+                                <p style={{ fontSize: 14, color: '#4b5563', marginBottom: 24, lineHeight: 1.6 }}>
+                                    {actionModal.type === 'Agendar' && 'Confirma que vas a agendar esta entrega para su seguimiento y gestión logística.'}
+                                    {actionModal.type === 'Cancelar' && 'Por favor, selecciona el motivo principal para cancelar esta entrega programada.'}
+                                    {actionModal.type === 'Posponer' && 'Selecciona el motivo y la nueva fecha propuesta para realizar esta entrega.'}
+                                </p>
+
+                                <div style={{ marginBottom: 24 }}>
+                                    {(actionModal.type === 'Agendar' || actionModal.type === 'Posponer') && (
+                                        <div style={{ marginBottom: 16 }}>
+                                            <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.05 }}>
+                                                Fecha de {actionModal.type === 'Agendar' ? 'Agendamiento' : 'Reprogramación'}
+                                            </label>
+                                            <input
+                                                type="date"
+                                                value={actionDate}
+                                                onChange={(e) => setActionDate(e.target.value)}
+                                                style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14 }}
+                                            />
+                                        </div>
                                     )}
-                                </select>
-                            ) : (
-                                <textarea
-                                    placeholder="Puedes añadir notas adicionales aquí..."
-                                    value={actionValue}
-                                    onChange={e => setActionValue(e.target.value)}
-                                    style={{ width: '100%', minHeight: 80, padding: '14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, resize: 'none', fontFamily: 'inherit' }}
-                                />
-                            )}
-                        </div>
 
-                        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                            <button
-                                onClick={() => setActionModal(null)}
-                                style={{ padding: '12px 24px', borderRadius: 12, border: '1.5px solid #e5e7eb', background: 'white', color: '#4b5563', fontSize: 14, fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }}
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                onClick={ejecutarAccion}
-                                disabled={actionLoading}
-                                style={{
-                                    padding: '12px 28px', borderRadius: 12, border: 'none',
-                                    background: actionModal.type === 'Cancelar' ? '#dc2626' : actionModal.type === 'Agendar' ? '#0369a1' : '#16a34a',
-                                    color: 'white', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                                    boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
-                                    opacity: actionLoading ? 0.7 : 1, transition: 'all 0.2s'
-                                }}
-                            >
-                                {actionLoading ? 'Procesando...' : `Confirmar ${actionModal.type}`}
-                            </button>
-                        </div>
+                                    <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', marginBottom: 10, letterSpacing: 0.05 }}>
+                                        {actionModal.type === 'Agendar' ? 'Notas / Observaciones' : 'Motivo Requerido'}
+                                    </label>
+
+                                    {actionModal.type === 'Cancelar' || actionModal.type === 'Posponer' ? (
+                                        <select
+                                            value={actionValue}
+                                            onChange={e => setActionValue(e.target.value)}
+                                            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, background: '#fff' }}
+                                        >
+                                            <option value="">Seleccione una opción...</option>
+                                            {actionModal.type === 'Cancelar' ? (
+                                                <>
+                                                    <option value="Paciente fallecido">Paciente fallecido</option>
+                                                    <option value="Error en prescripción">Error en prescripción</option>
+                                                    <option value="Duplicado">Duplicado</option>
+                                                    <option value="Paciente trasladado">Paciente trasladado</option>
+                                                    <option value="Paciente no requiere medicamento">Paciente no requiere medicamento</option>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <option value="Falta de inventario (Stock-out)">Falta de inventario (Stock-out)</option>
+                                                    <option value="Dirección incorrecta">Dirección incorrecta</option>
+                                                    <option value="Documentación incompleta">Documentación incompleta</option>
+                                                    <option value="Paciente solicita pausa">Paciente solicita pausa</option>
+                                                </>
+                                            )}
+                                        </select>
+                                    ) : (
+                                        <textarea
+                                            placeholder="Puedes añadir notas adicionales aquí..."
+                                            value={actionValue}
+                                            onChange={e => setActionValue(e.target.value)}
+                                            style={{ width: '100%', minHeight: 80, padding: '14px', borderRadius: 12, border: '1.5px solid #e5e7eb', outline: 'none', fontSize: 14, resize: 'none', fontFamily: 'inherit' }}
+                                        />
+                                    )}
+                                </div>
+
+                                <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                                    <button
+                                        onClick={resetDeliveryFlow}
+                                        style={{ padding: '12px 24px', borderRadius: 12, border: '1.5px solid #e5e7eb', background: 'white', color: '#4b5563', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={ejecutarAccion}
+                                        disabled={actionLoading}
+                                        style={{
+                                            padding: '12px 28px', borderRadius: 12, border: 'none',
+                                            background: actionModal.type === 'Cancelar' ? '#dc2626' : '#0369a1',
+                                            color: 'white', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                                            boxShadow: '0 4px 10px rgba(0,0,0,0.1)',
+                                            opacity: actionLoading ? 0.7 : 1
+                                        }}
+                                    >
+                                        {actionLoading ? 'Procesando...' : `Confirmar ${actionModal.type}`}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}
 
             {/* ═══ Leyenda ════════════════════════════════════════════════════ */}
             {despachos.length > 0 && (
-                <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12, color: 'var(--gray-500)', marginTop: 10 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#dcfce7', display: 'inline-block' }} />Entregado
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 11, color: 'var(--gray-500)', marginTop: 15, padding: '0 4px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#10b981' }} /> Entregado
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#e0f2fe', display: 'inline-block' }} />Agendado
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#0ea5e9' }} /> Agendado
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#eff6ff', display: 'inline-block' }} />Pendiente
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1' }} /> Pendiente
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fef3c7', display: 'inline-block' }} />Urgente (≤7 días) / Pospuesto
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#f59e0b' }} /> Urgente (≤7 días) / Pospuesto
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ width: 12, height: 12, borderRadius: 3, background: '#fee2e2', display: 'inline-block' }} />Vencido / Cancelado
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ef4444' }} /> Vencido / Cancelado
                     </span>
                 </div>
             )}
+
+            {/* Recall Management Modal */}
+            {recallModal.isOpen && recallModal.despacho && (
+                <RecallManagementModal
+                    isOpen={recallModal.isOpen}
+                    despacho={recallModal.despacho}
+                    onClose={() => setRecallModal({ isOpen: false, despacho: null })}
+                    onSave={async (action, observation) => {
+                        if (recallModal.despacho?.firestoreId) {
+                            await gestionarRescate(recallModal.despacho.firestoreId, action, observation, user?.email || 'Sistema');
+                            mostrarFeedback('ok', `✅ Rescate gestionado: ${action}.`);
+                            onRefresh?.();
+                        }
+                    }}
+                />
+            )}
+
+            {/* Follow-up Scheduling Modal */}
+            {followUpModal.isOpen && followUpModal.despacho && (
+                <FollowUpSchedulingModal
+                    isOpen={followUpModal.isOpen}
+                    despacho={followUpModal.despacho}
+                    onClose={() => setFollowUpModal({ isOpen: false, despacho: null })}
+                    onSave={async (fecha) => {
+                        if (followUpModal.despacho?.firestoreId) {
+                            await agendarSeguimiento(followUpModal.despacho.firestoreId, fecha, user?.email || 'Sistema');
+                            mostrarFeedback('info', '📅 Cita de seguimiento agendada.');
+                            onRefresh?.();
+                        }
+                    }}
+                />
+            )}
+
+            {/* Treatment Response Modal */}
+            {responseModal.isOpen && responseModal.despacho && (
+                <TreatmentResponseModal
+                    isOpen={responseModal.isOpen}
+                    despacho={responseModal.despacho}
+                    userEmail={user?.email || 'Sistema'}
+                    onClose={() => setResponseModal({ isOpen: false, despacho: null })}
+                    onSave={async (respuesta) => {
+                        if (responseModal.despacho?.firestoreId) {
+                            await registrarRespuestaTratamiento(responseModal.despacho.firestoreId, respuesta, user?.email || 'Sistema');
+                            mostrarFeedback('ok', '📋 Respuesta al tratamiento registrada con éxito.');
+                            onRefresh?.();
+                        }
+                    }}
+                />
+            )}
+
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                type={confirmModal.type}
+                onConfirm={confirmModal.onConfirm}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                confirmText="Confirmar"
+                cancelText="Cancelar"
+            />
         </div>
     );
 }

@@ -40,7 +40,9 @@ export function parseCsvPrescripciones(csvText: string, medicamentosDB: Medicame
         'entidad': ['entidad_aseguradora', 'eps', 'aseguradora', 'entidad'],
         'atc': ['atc', 'codigo_atc', 'code_atc'],
         'med': ['medicamento', 'producto', 'descripcion', 'insumo'],
-        'dur': ['duracion_de_tratamiento', 'duracion', 'tratamiento_dias']
+        'dur': ['duracion_de_tratamiento', 'duracion', 'tratamiento_dias'],
+        'serv': ['servicio', 'service', 'area'],
+        'est': ['estado', 'status', 'condicion', 'situacion']
     };
 
     let headerRowIndex = -1;
@@ -199,6 +201,13 @@ export function parseCsvPrescripciones(csvText: string, medicamentosDB: Medicame
                 continue;
             }
 
+            // --- FILTRO ONCOLÓGICO ---
+            // Solo procesar pacientes oncológicos. Ignorar si el estado es explícitamente "NO ONCO"
+            const estadoRaw = getByAlias('est').toUpperCase();
+            if (estadoRaw.includes('NO ONC')) {
+                continue; // Desechar pacientes no oncológicos
+            }
+
             // --- GESTIÓN DE PACIENTE (STICKY LOGIC) ---
             if (pId && pN1) {
                 ultimoPaciente = {
@@ -211,7 +220,8 @@ export function parseCsvPrescripciones(csvText: string, medicamentosDB: Medicame
                     gen: getByAlias('gen'),
                     ciudad: getByAlias('ciudad'),
                     entidad: getByAlias('entidad'),
-                    dur: getByAlias('dur')
+                    dur: getByAlias('dur'),
+                    serv: getByAlias('serv')
                 };
             }
 
@@ -235,10 +245,12 @@ export function parseCsvPrescripciones(csvText: string, medicamentosDB: Medicame
                 medicamento: pMedClean || finalMatch.medicamento,
                 duracionTratamiento: ultimoPaciente.dur,
                 dosis: finalMatch.dosisEstandar || '',
-                municipio: ultimoPaciente.ciudad,
+                municipio: ultimoPaciente.city || ultimoPaciente.ciudad,
                 eps: ultimoPaciente.entidad,
                 diasAdministracion: finalMatch.diasAdministracion || 30,
                 diasDescanso: finalMatch.diasDescanso || 0,
+                servicio: ultimoPaciente.serv,
+                esCargaManual: false
             });
         } catch (e) {
             console.warn("Error en fila:", i, e);
@@ -288,7 +300,7 @@ export function generarHojaRuta(
         while (fechaEntrega <= fechaLimite) {
             const fechaIso = fechaEntrega.toISOString().split('T')[0];
             despachos.push({
-                id: `${rx.pacienteId}_${fechaIso.replace(/-/g, '')}_${rx.atc}`,
+                id: `${rx.pacienteId}_${fechaIso.replace(/-/g, '')}_${rx.atc}_${rx.medicamento.substring(0, 20).replace(/[^A-Z0-9]/gi, '')}`,
                 numeroNota: rx.numeroNota,
                 pacienteId: rx.pacienteId,
                 nombre1: rx.nombre1,
@@ -310,6 +322,7 @@ export function generarHojaRuta(
                 diasEntrega: diasCiclo,
                 fechaProgramada: fechaIso,
                 confirmado: false,
+                esCargaManual: rx.esCargaManual || false
             });
             fechaEntrega.setDate(fechaEntrega.getDate() + diasCiclo);
         }
@@ -318,36 +331,6 @@ export function generarHojaRuta(
     return despachos.sort((a, b) => a.fechaProgramada.localeCompare(b.fechaProgramada));
 }
 
-export function generarHojaRutaDesdePacientes(
-    pacientes: Paciente[],
-    mesesProyeccion: number = 6
-): Despacho[] {
-    const prescripciones: Prescripcion[] = pacientes
-        .filter(p => (p.estado || '').startsWith('AC'))
-        .map(p => ({
-            pacienteId: p.numeroId || String(p.id),
-            numeroNota: '',
-            nombre1: p.nombreCompleto.split(' ')[0] || '',
-            nombre2: '',
-            apellido1: p.nombreCompleto.split(' ')[1] || '',
-            apellido2: '',
-            nombreCompleto: p.nombreCompleto,
-            telefonos: '',
-            genero: '',
-            ciudadResidencia: p.municipio,
-            entidadAseguradora: p.eps,
-            atc: '',
-            medicamento: p.medicamento,
-            duracionTratamiento: 'Indefinido',
-            dosis: p.dosisEstandar,
-            municipio: p.municipio,
-            eps: p.eps,
-            diasAdministracion: 30,
-            diasDescanso: 0,
-        }));
-
-    return generarHojaRuta(prescripciones, pacientes, mesesProyeccion);
-}
 
 export function formatFechaEntrega(isoDate: string): string {
     const [year, month, day] = isoDate.split('-').map(Number);
@@ -372,7 +355,69 @@ export function esEntregaUrgente(isoDate: string): boolean {
 export function esEntregaVencida(despacho: Despacho): boolean {
     if (despacho.confirmado) return false;
     const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
     const [y, m, d] = despacho.fechaProgramada.split('-').map(Number);
     const fecha = new Date(y, m - 1, d);
     return fecha < hoy;
+}
+
+/**
+ * Determina si un despacho es crítico basado en las reglas:
+ * 1. Estado es 'Pendiente' o 'Agendado' (o no confirmado).
+ * 2. La fecha programada es hoy o anterior.
+ */
+export function isDespachoCritico(despacho: Despacho): boolean {
+    const estado = despacho.estadoActual || (despacho.confirmado ? 'Entregado' : 'Pendiente');
+    const esEstadoCritico = estado === 'Pendiente' || estado === 'Agendado' || estado === 'Pospuesto';
+
+    if (!esEstadoCritico) return false;
+
+    // Comparación de fechas sin horas (Local)
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    const [y, m, d] = despacho.fechaProgramada.split('-').map(Number);
+    const fechaProg = new Date(y, m - 1, d);
+
+    return fechaProg <= hoy;
+}
+/**
+ * Grupo A: Entregas pendientes (no confirmadas y con fecha programada hasta hoy)
+ */
+export function getGrupoAPendientes(despachos: Despacho[]): Despacho[] {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    return despachos.filter(d => {
+        if (d.confirmado) return false;
+        const [y, m, d_num] = d.fechaProgramada.split('-').map(Number);
+        const fechaPkg = new Date(y, m - 1, d_num);
+        return fechaPkg <= hoy;
+    });
+}
+
+/**
+ * Grupo B: Rescate de pacientes (no confirmados, estado Agendado, 5 días de retraso exactos hoy)
+ */
+export function getGrupoBRescate(despachos: Despacho[]): Despacho[] {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    // Fecha hace 5 días
+    const fechaRescate = new Date(hoy);
+    fechaRescate.setDate(fechaRescate.getDate() - 5);
+    const isoRescate = fechaRescate.toISOString().split('T')[0];
+
+    return despachos.filter(d => {
+        // Solo registros que cumplieron 5 días de retraso exactos hoy
+        // Y cuyo estado sea Agendado
+        // Y que no hayan sido ya gestionados (Rescatado/Anulado)
+        return (
+            !d.confirmado &&
+            d.estadoActual === 'Agendado' &&
+            d.fechaProgramada === isoRescate &&
+            d.statusRecall !== 'Rescatado' &&
+            d.statusRecall !== 'Anulado'
+        );
+    });
 }

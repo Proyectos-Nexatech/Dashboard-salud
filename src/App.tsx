@@ -7,10 +7,11 @@ import Riesgos from './pages/Riesgos';
 import Simulacion from './pages/Simulacion';
 import Reportes from './pages/Reportes';
 import ControlDespachos from './pages/ControlDespachos';
+import ControlCiclos from './pages/ControlCiclos';
 import { PACIENTES_MOCK, EPS_LIST } from './data/mockData';
 import type { Paciente } from './data/mockData';
 import Medicamentos from './pages/MedicamentosList';
-import { subscribeToPatients, syncExcelData, seedFromMockData, addPatient, updatePatient, deletePatient, deletePatientsBatch } from './services/patientService';
+import { subscribeToPatients, seedFromMockData, addPatient, updatePatient, deletePatient, deletePatientsBatch } from './services/patientService';
 import { subscribeToMedicamentos, addMedicamento, updateMedicamento, deleteMedicamento, deleteMedicamentosBatch, seedMedicamentosFromMock } from './services/medicamentoService';
 import { subscribeToEntidades, addEntidad, updateEntidad, deleteEntidad, deleteEntidadesBatch, seedEntidadesFromMock, type EntidadInfo } from './services/epsService';
 import { subscribeToDespachos } from './services/despachoService';
@@ -22,6 +23,7 @@ import Configuracion from './pages/Configuracion';
 import { useAuth } from './context/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { subscribeToUsers, seedInitialUsers } from './services/userService';
+import { DespachoProvider } from './context/DespachoContext';
 
 const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     dashboard: { title: 'Dashboard', subtitle: 'Resumen ejecutivo de la cadena de suministro oncológico' },
@@ -33,6 +35,7 @@ const PAGE_TITLES: Record<string, { title: string; subtitle: string }> = {
     reportes: { title: 'Reportes e Indicadores', subtitle: 'Matriz de control operativo diario' },
     entidades: { title: 'Gestión de Entidades / EPS', subtitle: 'Administración de entidades promotoras de salud' },
     despachos: { title: 'Control de Entregas', subtitle: 'Gestión de hoja de ruta y confirmación de entregas' },
+    ciclos: { title: 'Control de Ciclos', subtitle: 'Trazabilidad clínica y seguimiento post-medicamento' },
     configuracion: { title: 'Configuración', subtitle: 'Ajustes del sistema' },
 };
 
@@ -43,9 +46,7 @@ export default function App() {
     const [pacientes, setPacientes] = useState<Paciente[]>(PACIENTES_MOCK);
     const [medicamentos, setMedicamentos] = useState<MedicamentoInfo[]>([]);
     const [entidades, setEntidades] = useState<EntidadInfo[]>([]);
-    const [despachos, setDespachos] = useState<Despacho[]>([]);
     const [loading, setLoading] = useState(true);
-    const [dbError, setDbError] = useState<string | null>(null);
 
     const [selectedEps, setSelectedEps] = useState('');
     const [selectedMunicipio, setSelectedMunicipio] = useState('');
@@ -105,10 +106,6 @@ export default function App() {
             setLoading(false);
         }, 8000);
 
-        const unsubDespachos = subscribeToDespachos((data) => {
-            setDespachos(data);
-        });
-
         const unsubUsers = subscribeToUsers((data) => {
             if (data.length === 0) {
                 seedInitialUsers().catch(console.error);
@@ -119,33 +116,11 @@ export default function App() {
             unsubPatients();
             unsubMeds();
             unsubEntidades();
-            unsubDespachos();
             unsubUsers();
             clearTimeout(timeout);
         };
     }, []);
 
-    const handleFileUpload = (file: File) => {
-        console.log('File uploaded:', file.name);
-    };
-
-    const handleDataLoaded = async (newPacientes: Paciente[], year?: number) => {
-        try {
-            // Sync to Firestore with merge logic
-            await syncExcelData(newPacientes, pacientes);
-            console.log('✅ Datos sincronizados con Firestore');
-
-            if (year) {
-                setCurrentYear(year);
-                localStorage.setItem('data_year', String(year));
-            }
-        } catch (error) {
-            console.error('Error syncing to Firestore:', error);
-            setDbError('Error al sincronizar datos. Los datos se muestran localmente.');
-            // Fallback: update local state even if Firestore fails
-            setPacientes(newPacientes);
-        }
-    };
 
     const municipiosList = [...new Set(pacientes.map(p => p.municipio))].filter(Boolean).sort();
     const medicamentosList = [...new Set(pacientes.map(p => p.medicamento))].filter(Boolean).sort();
@@ -159,7 +134,6 @@ export default function App() {
                 return (
                     <Dashboard
                         pacientes={pacientes}
-                        onDataLoaded={handleDataLoaded}
                         selectedEps={selectedEps}
                         selectedMunicipio={selectedMunicipio}
                         selectedMedicamento={selectedMedicamento}
@@ -202,9 +176,12 @@ export default function App() {
                     <ControlDespachos
                         pacientes={pacientes}
                         medicamentos={medicamentos}
-                        despachos={despachos}
                         onRefresh={() => console.log('Despachos refreshed')}
                     />
+                );
+            case 'ciclos':
+                return (
+                    <ControlCiclos />
                 );
             case 'configuracion':
                 return <Configuracion />;
@@ -238,52 +215,53 @@ export default function App() {
     }
 
     return (
-        <div className="app-layout">
-            {/* Mobile hamburger toggle */}
-            <button
-                className={`sidebar-toggle ${sidebarOpen ? 'open' : ''}`}
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                aria-label="Toggle menu"
-            >
-                {sidebarOpen ? '✕' : '☰'}
-            </button>
+        <DespachoProvider>
+            <div className="app-layout">
+                {/* Mobile hamburger toggle */}
+                <button
+                    className={`sidebar-toggle ${sidebarOpen ? 'open' : ''}`}
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    aria-label="Toggle menu"
+                >
+                    {sidebarOpen ? '✕' : '☰'}
+                </button>
 
-            {/* Mobile overlay */}
-            <div
-                className={`sidebar-overlay ${sidebarOpen ? 'active' : ''}`}
-                onClick={() => setSidebarOpen(false)}
-            />
-
-            <Sidebar activePage={activePage} onNavigate={handleNavigate} sidebarOpen={sidebarOpen} />
-
-            <div className="main-content">
-                <Header
-                    onDataLoaded={handleDataLoaded}
-                    onFileUpload={handleFileUpload}
-                    selectedEps={selectedEps}
-                    selectedMunicipio={selectedMunicipio}
-                    selectedMedicamento={selectedMedicamento}
-                    onEpsChange={setSelectedEps}
-                    onMunicipioChange={setSelectedMunicipio}
-                    onMedicamentoChange={setSelectedMedicamento}
-                    epsList={epsList}
-                    municipiosList={municipiosList}
-                    medicamentosList={medicamentosList}
-                    alertCount={alertCount}
+                {/* Mobile overlay */}
+                <div
+                    className={`sidebar-overlay ${sidebarOpen ? 'active' : ''}`}
+                    onClick={() => setSidebarOpen(false)}
                 />
 
-                <main className="page-content">
-                    <div className="page-title-container" style={{ marginBottom: 20 }}>
-                        <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gray-900)', letterSpacing: '-0.3px' }}>
-                            {pageInfo.title}
-                        </h2>
-                        <p style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 2 }}>
-                            {pageInfo.subtitle}
-                        </p>
-                    </div>
-                    {renderPage()}
-                </main>
+                <Sidebar activePage={activePage} onNavigate={handleNavigate} sidebarOpen={sidebarOpen} />
+
+                <div className="main-content">
+                    <Header
+                        selectedEps={selectedEps}
+                        selectedMunicipio={selectedMunicipio}
+                        selectedMedicamento={selectedMedicamento}
+                        onEpsChange={setSelectedEps}
+                        onMunicipioChange={setSelectedMunicipio}
+                        onMedicamentoChange={setSelectedMedicamento}
+                        epsList={epsList}
+                        municipiosList={municipiosList}
+                        medicamentosList={medicamentosList}
+                        alertCount={alertCount}
+                        onNavigate={handleNavigate}
+                    />
+
+                    <main className="page-content">
+                        <div className="page-title-container" style={{ marginBottom: 20 }}>
+                            <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gray-900)', letterSpacing: '-0.3px' }}>
+                                {pageInfo.title}
+                            </h2>
+                            <p style={{ fontSize: 13, color: 'var(--gray-500)', marginTop: 2 }}>
+                                {pageInfo.subtitle}
+                            </p>
+                        </div>
+                        {renderPage()}
+                    </main>
+                </div>
             </div>
-        </div>
+        </DespachoProvider>
     );
 }

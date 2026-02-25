@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import type { Paciente } from '../data/mockData';
+import type { Prescripcion } from '../data/despachoTypes';
 
 const PATIENTS_COLLECTION = 'patients';
 
@@ -48,7 +49,7 @@ function toFirestoreDoc(p: Paciente): Record<string, any> {
         diasAdministracion: p.diasAdministracion || 0,
         diasDescanso: p.diasDescanso || 0,
         entregas: p.entregas || {},
-        tipoPaciente: p.tipoPaciente || '',
+        servicio: p.servicio || '',
         _nombreNorm: normalize(p.nombreCompleto), // For search indexing
         _updatedAt: new Date().toISOString()
     };
@@ -81,7 +82,7 @@ function fromFirestoreDoc(data: Record<string, any>): Paciente {
         diasAdministracion: data.diasAdministracion || 0,
         diasDescanso: data.diasDescanso || 0,
         entregas: data.entregas || {},
-        tipoPaciente: data.tipoPaciente || undefined,
+        servicio: data.servicio || '',
     } as Paciente;
 }
 
@@ -104,97 +105,6 @@ export function subscribeToPatients(callback: (patients: Paciente[]) => void): U
     });
 }
 
-/**
- * Delete all documents in the patients collection (in batches of 490)
- */
-async function clearAllPatients(): Promise<void> {
-    const BATCH_LIMIT = 490;
-    const snapshot = await getDocs(collection(db, PATIENTS_COLLECTION));
-    const docs = snapshot.docs;
-
-    for (let i = 0; i < docs.length; i += BATCH_LIMIT) {
-        const batch = writeBatch(db);
-        const chunk = docs.slice(i, i + BATCH_LIMIT);
-        for (const d of chunk) {
-            batch.delete(d.ref);
-        }
-        await batch.commit();
-    }
-    console.log(`🗑️ Limpiados ${docs.length} documentos anteriores`);
-}
-
-/**
- * Sync patient data from Excel upload to Firestore.
- * REPLACES all existing data with the new Excel data.
- * Handles >500 patients by splitting into multiple batches.
- */
-export async function syncExcelData(
-    newPacientes: Paciente[],
-    existingPatients: Paciente[]
-): Promise<void> {
-    // Step 1: Clear existing data so we don't accumulate duplicates
-    await clearAllPatients();
-
-    const BATCH_LIMIT = 490;
-    const operations: { docId: string; data: Record<string, any> }[] = [];
-
-    for (const newP of newPacientes) {
-        // 1. Try to find existing patient by ID
-        let existingP: Paciente | undefined;
-        if (newP.numeroId) {
-            existingP = existingPatients.find(p => p.numeroId === newP.numeroId);
-        }
-
-        // 2. Fallback: find by normalized name
-        if (!existingP && newP.nombreCompleto) {
-            const newName = normalize(newP.nombreCompleto);
-            existingP = existingPatients.find(p => normalize(p.nombreCompleto) === newName);
-        }
-
-        // Build the document ID
-        let docId: string;
-        if (existingP && existingP.numeroId) {
-            docId = existingP.numeroId;
-        } else if (newP.numeroId) {
-            docId = newP.numeroId;
-        } else {
-            docId = normalize(newP.nombreCompleto).replace(/[\/\.#\$\[\]]/g, '_');
-        }
-
-        // Merge: keep existing data where new data is empty
-        const merged: Paciente = existingP ? {
-            ...existingP,
-            ...newP,
-            numeroId: newP.numeroId || existingP.numeroId,
-            nombreCompleto: newP.nombreCompleto || existingP.nombreCompleto,
-            fechaNacimiento: (newP.fechaNacimiento && newP.fechaNacimiento !== 'N/A') ? newP.fechaNacimiento : existingP.fechaNacimiento,
-            telefono: (newP.telefono && newP.telefono !== 'N/A') ? newP.telefono : existingP.telefono,
-            edad: newP.edad || existingP.edad,
-            sexo: newP.sexo || existingP.sexo,
-            municipio: newP.municipio || existingP.municipio,
-            eps: newP.eps || existingP.eps,
-            entidad: newP.entidad || existingP.entidad,
-            entregas: { ...existingP.entregas, ...newP.entregas },
-            tipoPaciente: newP.tipoPaciente || existingP.tipoPaciente,
-        } : newP;
-
-        operations.push({ docId, data: toFirestoreDoc(merged) });
-    }
-
-    // Split into batches of BATCH_LIMIT
-    for (let i = 0; i < operations.length; i += BATCH_LIMIT) {
-        const batch = writeBatch(db);
-        const chunk = operations.slice(i, i + BATCH_LIMIT);
-        for (const op of chunk) {
-            const ref = doc(db, PATIENTS_COLLECTION, op.docId);
-            batch.set(ref, op.data, { merge: true });
-        }
-        await batch.commit();
-        console.log(`✅ Batch ${Math.floor(i / BATCH_LIMIT) + 1} committed (${chunk.length} patients)`);
-    }
-
-    console.log(`✅ Total: ${operations.length} pacientes sincronizados`);
-}
 
 /**
  * Seed Firestore with initial mock data (run once to populate).
@@ -271,4 +181,75 @@ export async function deletePatientsBatch(numeroIds: string[]): Promise<void> {
         console.log(`🗑️ Batch ${Math.floor(i / BATCH_LIMIT) + 1}: ${chunk.length} pacientes eliminados`);
     }
     console.log(`🗑️ Total eliminados: ${numeroIds.length} pacientes`);
+}
+
+/**
+ * Sync patients from prescriptions.
+ * Creates new patients if they don't exist.
+ */
+export async function upsertPatientsFromPrescripciones(
+    prescripciones: Prescripcion[],
+    existingPatients: Paciente[]
+): Promise<void> {
+    const BATCH_LIMIT = 490;
+    const operations: { docId: string; data: Record<string, any> }[] = [];
+
+    // De-duplicate patients by ID in the current upload
+    const uniqueIncoming = new Map<string, Prescripcion>();
+    prescripciones.forEach(rx => {
+        if (!uniqueIncoming.has(rx.pacienteId)) {
+            uniqueIncoming.set(rx.pacienteId, rx);
+        }
+    });
+
+    for (const rx of uniqueIncoming.values()) {
+        const id = rx.pacienteId;
+        const exists = existingPatients.find(p => p.numeroId === id);
+
+        if (exists) {
+            // User says: "if exists do nothing". 
+            // However, we might want to update "servicio" if it's missing?
+            // "verificar si ya existe no hacer nada, si no existe crearlo"
+            continue;
+        }
+
+        // Create new patient
+        const newPatient: Paciente = {
+            id: Date.now() + Math.floor(Math.random() * 1000), // Temp internal ID
+            nombre1: rx.nombre1,
+            nombre2: rx.nombre2,
+            apellido1: rx.apellido1,
+            apellido2: rx.apellido2,
+            nombreCompleto: rx.nombreCompleto,
+            tipoId: 'CC', // Default
+            numeroId: rx.pacienteId,
+            eps: rx.eps,
+            telefono: rx.telefonos,
+            municipio: rx.municipio,
+            fechaNacimiento: '',
+            edad: 0,
+            estado: 'AC ONC',
+            medicamento: rx.medicamento,
+            dosisEstandar: rx.dosis,
+            diasAdministracion: rx.diasAdministracion,
+            diasDescanso: rx.diasDescanso,
+            entregas: {},
+            servicio: rx.servicio
+        };
+
+        operations.push({ docId: id, data: toFirestoreDoc(newPatient) });
+    }
+
+    if (operations.length === 0) return;
+
+    for (let i = 0; i < operations.length; i += BATCH_LIMIT) {
+        const batch = writeBatch(db);
+        const chunk = operations.slice(i, i + BATCH_LIMIT);
+        for (const op of chunk) {
+            const ref = doc(db, PATIENTS_COLLECTION, op.docId);
+            batch.set(ref, op.data, { merge: true });
+        }
+        await batch.commit();
+    }
+    console.log(`✅ ${operations.length} nuevos pacientes creados.`);
 }

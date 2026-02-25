@@ -44,8 +44,22 @@ function toFirestoreDoc(d: Despacho): Record<string, unknown> {
         confirmado: d.confirmado,
         fechaConfirmacion: d.fechaConfirmacion || '',
         observaciones: d.observaciones || '',
+        modality: d.modality || 'Farmacia',
+        domicilioVerificado: d.domicilioVerificado || false,
+        timeline: d.timeline || [],
+        evidencia: d.evidencia || '',
+        geolocalizacion: d.geolocalizacion || null,
         estadoActual: d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente'),
         motivo: d.motivo || '',
+        modificadoPor: d.modificadoPor || '',
+        ultimaModificacion: d.ultimaModificacion || '',
+        statusRecall: d.statusRecall || 'Pendiente',
+        observacionRecall: d.observacionRecall || '',
+        // Seguimiento
+        seguimientoEstado: d.seguimientoEstado || 'Pendiente',
+        seguimientoFechaProgramada: d.seguimientoFechaProgramada || '',
+        seguimientoRespuesta: d.seguimientoRespuesta || null,
+        esCargaManual: d.esCargaManual || false,
         _updatedAt: new Date().toISOString(),
     };
 }
@@ -77,8 +91,22 @@ function fromFirestoreDoc(data: Record<string, unknown>, firestoreId: string): D
         confirmado: Boolean(data.confirmado),
         fechaConfirmacion: data.fechaConfirmacion ? String(data.fechaConfirmacion) : undefined,
         observaciones: data.observaciones ? String(data.observaciones) : undefined,
+        modality: data.modality as any,
+        domicilioVerificado: Boolean(data.domicilioVerificado),
+        timeline: (data.timeline as any[]) || [],
+        evidencia: (data.evidencia || data.firma) as string,
+        geolocalizacion: data.geolocalizacion as any,
         estadoActual: (data.estadoActual as Despacho['estadoActual']) ?? (Boolean(data.confirmado) ? 'Entregado' : 'Pendiente'),
         motivo: data.motivo ? String(data.motivo) : undefined,
+        modificadoPor: data.modificadoPor ? String(data.modificadoPor) : undefined,
+        ultimaModificacion: data.ultimaModificacion ? String(data.ultimaModificacion) : undefined,
+        statusRecall: data.statusRecall as Despacho['statusRecall'],
+        observacionRecall: data.observacionRecall as string,
+        // Seguimiento Post-Entrega
+        seguimientoEstado: data.seguimientoEstado as Despacho['seguimientoEstado'],
+        seguimientoFechaProgramada: data.seguimientoFechaProgramada as string,
+        seguimientoRespuesta: data.seguimientoRespuesta as Despacho['seguimientoRespuesta'],
+        esCargaManual: Boolean(data.esCargaManual),
     };
 }
 
@@ -107,6 +135,11 @@ export function subscribeToDespachos(
  * Usa el campo `id` del despacho como document ID para evitar duplicados.
  * @param onProgress Callback opcional para monitorear el progreso (0 a 100)
  */
+/**
+ * Alias para addDespachos que refleja mejor la sincronización con el CSV.
+ */
+export const sincronizarHojaRutaConFirestore = addDespachos;
+
 export async function addDespachos(
     despachos: Despacho[],
     onProgress?: (progress: number) => void
@@ -148,16 +181,24 @@ export async function addDespachos(
 export async function confirmarDespacho(
     firestoreId: string,
     observaciones?: string,
-    fechaConfirmacion?: string
+    fechaConfirmacion?: string,
+    usuario?: string,
+    extra?: Partial<Despacho>
 ): Promise<void> {
     const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
-    await updateDoc(ref, {
+    const now = new Date().toISOString();
+    const updates: any = {
         confirmado: true,
-        estadoActual: 'Entregado',
-        fechaConfirmacion: fechaConfirmacion || new Date().toISOString().split('T')[0],
+        estadoActual: extra?.estadoActual || 'Entregado',
+        fechaConfirmacion: fechaConfirmacion || now.split('T')[0],
         observaciones: observaciones || '',
-        _updatedAt: new Date().toISOString(),
-    });
+        modificadoPor: usuario || '',
+        ultimaModificacion: now,
+        _updatedAt: now,
+        ...extra
+    };
+
+    await updateDoc(ref, updates);
 }
 
 /**
@@ -167,13 +208,32 @@ export async function actualizarEstadoDespacho(
     firestoreId: string,
     nuevoEstado: Despacho['estadoActual'],
     motivo?: string,
-    nuevaFecha?: string
+    nuevaFecha?: string,
+    usuario?: string,
+    existingTimeline: any[] = []
 ): Promise<void> {
     const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
+    const now = new Date().toISOString();
+
+    // Si el estado es uno de los hitos técnicos, lo añadimos al timeline
+    const trackingStates = ['Despachado', 'En Camino', 'Entregado (Domicilio)', 'Entregado (Farmacia)'];
+    let updatedTimeline = [...existingTimeline];
+
+    if (nuevoEstado && trackingStates.includes(nuevoEstado as string)) {
+        updatedTimeline.push({
+            hito: nuevoEstado,
+            timestamp: now,
+            usuario: usuario || 'Sistema'
+        });
+    }
+
     const updates: any = {
         estadoActual: nuevoEstado,
         motivo: motivo || '',
-        _updatedAt: new Date().toISOString(),
+        modificadoPor: usuario || '',
+        ultimaModificacion: now,
+        _updatedAt: now,
+        timeline: updatedTimeline
     };
     if (nuevaFecha) {
         updates.fechaProgramada = nuevaFecha;
@@ -182,6 +242,13 @@ export async function actualizarEstadoDespacho(
     if (nuevoEstado === 'Cancelado' || nuevoEstado === 'Pospuesto') {
         updates.confirmado = false;
     }
+
+    // Si el nuevo estado es una forma de "Entregado", marcamos confirmado
+    if (nuevoEstado?.includes('Entregado')) {
+        updates.confirmado = true;
+        updates.fechaConfirmacion = now.split('T')[0];
+    }
+
     await updateDoc(ref, updates);
 }
 
@@ -236,4 +303,70 @@ export async function eliminarTodosLosDespachos(onProgress?: (progress: number) 
         await batch.commit();
         if (onProgress) onProgress(100);
     }
+}
+
+/**
+ * Registra una acción de gestión sobre un paciente en rescate (Grupo B).
+ */
+export async function gestionarRescate(
+    firestoreId: string,
+    nuevoStatus: Despacho['statusRecall'],
+    observacion: string,
+    usuario?: string
+): Promise<void> {
+    const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
+    const now = new Date().toISOString();
+
+    const updates: any = {
+        statusRecall: nuevoStatus,
+        observacionRecall: observacion,
+        modificadoPor: usuario || 'Sistema',
+        ultimaModificacion: now,
+        _updatedAt: now,
+    };
+
+    // Si la gestión implica que ya no está pendiente de entrega por alguna razón específica
+    // o si se reprograma, el estadoActual del despacho debería reflejarlo en ControlDespachos.
+    // Aquí solo actualizamos los campos de recall por ahora.
+
+    await updateDoc(ref, updates);
+}
+/**
+ * Registra una cita de seguimiento post-entrega.
+ */
+export async function agendarSeguimiento(
+    firestoreId: string,
+    fecha: string,
+    usuario?: string
+): Promise<void> {
+    const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
+    const now = new Date().toISOString();
+
+    await updateDoc(ref, {
+        seguimientoEstado: 'Programado',
+        seguimientoFechaProgramada: fecha,
+        modificadoPor: usuario || 'Sistema',
+        ultimaModificacion: now,
+        _updatedAt: now
+    });
+}
+
+/**
+ * Registra la respuesta clínica de un paciente al tratamiento.
+ */
+export async function registrarRespuestaTratamiento(
+    firestoreId: string,
+    respuesta: any, // TreatmentResponse
+    usuario?: string
+): Promise<void> {
+    const ref = doc(db, DESPACHOS_COLLECTION, firestoreId);
+    const now = new Date().toISOString();
+
+    await updateDoc(ref, {
+        seguimientoEstado: 'Completado',
+        seguimientoRespuesta: respuesta,
+        modificadoPor: usuario || 'Sistema',
+        ultimaModificacion: now,
+        _updatedAt: now
+    });
 }

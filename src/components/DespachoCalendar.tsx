@@ -5,12 +5,13 @@ import {
 } from 'lucide-react';
 import type { Despacho } from '../data/despachoTypes';
 import { formatFechaEntrega, esEntregaUrgente, esEntregaVencida } from '../utils/despachoUtils';
+import DeliveryTimeline from './DeliveryTimeline';
 
 interface DespachoCalendarProps {
     despachos: Despacho[];
     onClose: () => void;
-    onConfirm: (despachoId: string, observaciones: string, fechaConfirmacion?: string) => Promise<void>;
-    onUpdateStatus: (id: string, estado: Despacho['estadoActual'], motivo: string, nuevaFecha?: string) => Promise<void>;
+    onConfirm: (despachoId: string, observaciones: string, fechaConfirmacion?: string, user?: string, extra?: Partial<Despacho>) => Promise<void>;
+    onUpdateStatus: (id: string, estado: Despacho['estadoActual'], motivo: string, nuevaFecha?: string, usuario?: string, timeline?: any[]) => Promise<void>;
 }
 
 type ViewMode = 'Día' | 'Mes' | 'Año';
@@ -95,15 +96,14 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
 
     const getDespachoColor = (d: Despacho) => {
         const estado = d.estadoActual || (d.confirmado ? 'Entregado' : 'Pendiente');
-        if (estado === 'Entregado') return '#16a34a';
-        if (estado === 'Agendado') return '#0369a1';
-        if (estado === 'Cancelado') return '#dc2626';
-        if (estado === 'Pospuesto') return '#b45309';  // Ámbar/Amarillo
+        if (estado === 'Entregado' || estado.includes('Entregado')) return '#10b981';
+        if (estado === 'Agendado') return '#0ea5e9';
+        if (estado === 'Despachado') return '#6366f1';
+        if (estado === 'En Camino') return '#8b5cf6';
+        if (estado === 'Cancelado') return '#ef4444';
+        if (estado === 'Pospuesto') return '#f59e0b';
 
-        if (esEntregaVencida(d)) return '#dc2626';
-        if (esEntregaUrgente(d.fechaProgramada)) return '#f59e0b';
-
-        return '#1a73e8'; // Pendiente default azul
+        return '#6366f1'; // Pendiente
     };
 
     // ─── Renderers ───────────────────────────────────────────────────────────
@@ -334,12 +334,11 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                         <div style={{ borderTop: `1px solid ${G_COLORS.border}`, paddingTop: 16 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', fontSize: 14 }}><Filter size={16} /> <span style={{ fontWeight: 500 }}>Filtros de Entrega</span></div>
                             <div style={{ padding: '8px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                <LegendItem color="#16a34a" label="Entregados" />
-                                <LegendItem color="#0369a1" label="Agendados" />
-                                <LegendItem color="#1a73e8" label="Pendientes" />
-                                <LegendItem color="#f59e0b" label="Urgentes" />
-                                <LegendItem color="#b45309" label="Pospuestos" />
-                                <LegendItem color="#dc2626" label="Vencidos / Cancelados" />
+                                <LegendItem color="#10b981" label="Entregados" />
+                                <LegendItem color="#0ea5e9" label="Agendados" />
+                                <LegendItem color="#6366f1" label="Pendientes" />
+                                <LegendItem color="#f59e0b" label="Pospuestos" />
+                                <LegendItem color="#ef4444" label="Cancelados" />
                             </div>
                         </div>
                     </aside>
@@ -356,7 +355,10 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                     <div style={{ background: 'white', borderRadius: 8, width: '100%', maxWidth: 440, boxShadow: '0 24px 38px 3px rgba(0,0,0,0.14)', position: 'relative', overflow: 'hidden' }}>
                         <div style={{ height: 48, background: '#f1f3f4', display: 'flex', alignItems: 'center', padding: '0 8px', justifyContent: 'flex-end' }}><button onClick={() => setSelectedDespacho(null)} style={iconBtnStyle}><X size={18} /></button></div>
                         <div style={{ padding: '24px 32px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}><div style={{ width: 12, height: 12, borderRadius: '50%', background: selectedDespacho.confirmado ? '#16a34a' : '#1a73e8' }} /><h2 style={{ fontSize: 22, fontWeight: 400, color: G_COLORS.text, margin: 0 }}>Detalle del Despacho</h2></div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
+                                <div style={{ width: 12, height: 12, borderRadius: '50%', background: getDespachoColor(selectedDespacho) }} />
+                                <h2 style={{ fontSize: 22, fontWeight: 400, color: G_COLORS.text, margin: 0 }}>Detalle de la Entrega</h2>
+                            </div>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                                 <InfoItem icon={<Clock size={18} />} value={formatFechaEntrega(selectedDespacho.fechaProgramada)} />
                                 <InfoItem icon={<User size={18} />} value={selectedDespacho.nombreCompleto} sub={`ID: ${selectedDespacho.pacienteId}`} />
@@ -389,7 +391,7 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                                     style={{
                                                         flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: 700, borderRadius: 6,
                                                         border: 'none',
-                                                        background: actionType === t ? (t === 'Entregar' ? '#16a34a' : t === 'Cancelar' ? '#dc2626' : t === 'Posponer' ? '#2563eb' : '#0369a1') : '#f1f3f4',
+                                                        background: actionType === t ? (t === 'Entregar' ? '#10b981' : t === 'Cancelar' ? '#ef4444' : t === 'Posponer' ? '#f59e0b' : '#0ea5e9') : '#f1f3f4',
                                                         color: actionType === t ? 'white' : '#5f6368',
                                                         cursor: 'pointer',
                                                         transition: 'all 0.2s'
@@ -450,9 +452,9 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                             setConfirmando(true);
                                             try {
                                                 if (actionType === 'Entregar') {
-                                                    await onConfirm(selectedDespacho.id, observaciones, actionDate);
+                                                    await onConfirm(selectedDespacho.firestoreId || selectedDespacho.id, observaciones, actionDate, undefined, { timeline: selectedDespacho.timeline });
                                                 } else {
-                                                    await onUpdateStatus(selectedDespacho.id, actionType === 'Agendar' ? 'Agendado' : actionType === 'Cancelar' ? 'Cancelado' : 'Pospuesto', actionValue, actionDate);
+                                                    await onUpdateStatus(selectedDespacho.firestoreId || selectedDespacho.id, actionType === 'Agendar' ? 'Agendado' : actionType === 'Cancelar' ? 'Cancelado' : 'Pospuesto', actionValue, actionDate, undefined, selectedDespacho.timeline);
                                                 }
                                                 setSelectedDespacho(null);
                                                 setObservaciones('');
@@ -466,7 +468,7 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                         disabled={confirmando || (actionType !== 'Entregar' && actionType !== 'Agendar' && !actionValue)}
                                         style={{
                                             width: '100%', padding: '12px', borderRadius: 8,
-                                            background: actionType === 'Entregar' ? '#16a34a' : actionType === 'Cancelar' ? '#dc2626' : actionType === 'Posponer' ? '#2563eb' : '#0369a1',
+                                            background: actionType === 'Entregar' ? '#10b981' : actionType === 'Cancelar' ? '#ef4444' : actionType === 'Posponer' ? '#f59e0b' : '#0ea5e9',
                                             color: 'white', border: 'none', fontWeight: 600, fontSize: 14, cursor: confirmando ? 'not-allowed' : 'pointer',
                                             opacity: (confirmando || (actionType !== 'Entregar' && actionType !== 'Agendar' && !actionValue)) ? 0.7 : 1
                                         }}
@@ -475,14 +477,39 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
                                     </button>
                                 </div>
                             )}
-                            {(selectedDespacho.confirmado || selectedDespacho.estadoActual === 'Entregado' || selectedDespacho.estadoActual === 'Cancelado') && (
+                            {(selectedDespacho.estadoActual !== 'Pendiente' || selectedDespacho.modificadoPor) && (
                                 <div style={{ marginTop: 20, padding: '12px 16px', borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                                     <div style={{ fontSize: 12, fontWeight: 700, color: G_COLORS.textLight, textTransform: 'uppercase', marginBottom: 4 }}>Estado Actual</div>
-                                    <div style={{ fontSize: 14, fontWeight: 600, color: selectedDespacho.estadoActual === 'Cancelado' ? '#dc2626' : '#16a34a' }}>
-                                        {selectedDespacho.estadoActual === 'Cancelado' ? '✕ Cancelado' : '✓ Entregado'}
+                                    <div style={{ fontSize: 14, fontWeight: 600, color: getDespachoColor(selectedDespacho) }}>
+                                        {selectedDespacho.estadoActual}
                                     </div>
+
+                                    {selectedDespacho.modality === 'Domicilio' && selectedDespacho.timeline && selectedDespacho.timeline.length > 0 && (
+                                        <div style={{ marginTop: 12, padding: '10px 0', borderTop: '1px solid #e2e8f0' }}>
+                                            <DeliveryTimeline
+                                                events={selectedDespacho.timeline}
+                                                currentStep={selectedDespacho.estadoActual as any}
+                                            />
+                                        </div>
+                                    )}
+
                                     {selectedDespacho.motivo && <div style={{ fontSize: 13, color: G_COLORS.text, marginTop: 4, fontStyle: 'italic' }}>"{selectedDespacho.motivo}"</div>}
                                     {selectedDespacho.observaciones && <div style={{ fontSize: 13, color: G_COLORS.text, marginTop: 4 }}>Obs: {selectedDespacho.observaciones}</div>}
+                                    {(selectedDespacho.evidencia || selectedDespacho.firma) && (
+                                        <div style={{ marginTop: 10 }}>
+                                            <div style={{ fontSize: 11, fontWeight: 700, color: G_COLORS.textLight, marginBottom: 4 }}>EVIDENCIA DE ENTREGA:</div>
+                                            <img
+                                                src={selectedDespacho.evidencia || selectedDespacho.firma}
+                                                alt="Evidencia"
+                                                style={{ width: '100%', maxHeight: 120, objectFit: 'contain', border: '1px solid #eee', borderRadius: 4, background: '#fff' }}
+                                            />
+                                        </div>
+                                    )}
+                                    {selectedDespacho.modificadoPor && (
+                                        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e2e8f0', fontSize: 11, color: '#64748b' }}>
+                                            Actualizado por: <strong>{selectedDespacho.modificadoPor}</strong> el {new Date(selectedDespacho.ultimaModificacion!).toLocaleString('es-ES')}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -494,7 +521,7 @@ export default function DespachoCalendar({ despachos, onClose, onConfirm, onUpda
 }
 
 function LegendItem({ color, label }: { color: string, label: string }) {
-    return (<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div style={{ width: 14, height: 14, borderRadius: 2, background: color, border: '1px solid rgba(0,0,0,0.1)' }} /><span style={{ fontSize: 13, color: '#3c4043' }}>{label}</span></div>);
+    return (<div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><div style={{ width: 12, height: 12, borderRadius: '50%', background: color, border: '1px solid rgba(0,0,0,0.05)' }} /><span style={{ fontSize: 13, color: '#3c4043' }}>{label}</span></div>);
 }
 
 function InfoItem({ icon, value, sub }: { icon: any, value: string, sub?: string }) {

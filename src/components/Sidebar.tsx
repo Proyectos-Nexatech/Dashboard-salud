@@ -1,5 +1,5 @@
 import {
-    LayoutDashboard, Users, AlertTriangle, FileText, ChevronRight, Settings, Pill, Building2, PackageCheck
+    LayoutDashboard, Users, AlertTriangle, FileText, ChevronRight, Settings, Pill, Building2, PackageCheck, ClipboardList
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -14,6 +14,7 @@ const navItems = [
     { id: 'medicamentos', icon: Pill, label: 'Medicamentos' },
     { id: 'entidades', icon: Building2, label: 'Entidades' },
     { id: 'despachos', icon: PackageCheck, label: 'Control de Entregas' },
+    { id: 'ciclos', icon: ClipboardList, label: 'Control de Ciclos' },
     { id: 'reportes', icon: FileText, label: 'Reportes' },
     { id: 'riesgos', icon: AlertTriangle, label: 'Riesgos' },
 ];

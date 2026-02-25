@@ -24,7 +24,9 @@ export interface Prescripcion {
     eps: string;
     diasAdministracion: number;
     diasDescanso: number;
+    servicio?: string;
     periodicidadDias?: number;
+    esCargaManual?: boolean;
 }
 
 /** Una entrega proyectada (fecha futura calculada) */
@@ -55,11 +57,43 @@ export interface EntregaProgramada {
 /** Un despacho concreto (puede estar pendiente o confirmado) */
 export interface Despacho extends EntregaProgramada {
     confirmado: boolean;
+    modality?: 'Farmacia' | 'Domicilio';
+    domicilioVerificado?: boolean;
+    timeline?: Array<{
+        hito: 'Despachado' | 'En Camino' | 'Entregado (Domicilio)' | 'Entregado (Farmacia)';
+        timestamp: string;
+        usuario: string;
+    }>;
+    evidencia?: string; // Base64 (Firma o Foto)
+    firma?: string; // Deprecated: usar evidencia
+    geolocalizacion?: {
+        lat: number;
+        lng: number;
+    };
     fechaConfirmacion?: string;
     observaciones?: string;
     firestoreId?: string;
-    estadoActual?: 'Pendiente' | 'Agendado' | 'Entregado' | 'Cancelado' | 'Pospuesto';
+    estadoActual?: 'Pendiente' | 'Agendado' | 'Despachado' | 'En Camino' | 'Entregado' | 'Entregado (Domicilio)' | 'Entregado (Farmacia)' | 'Cancelado' | 'Pospuesto';
     motivo?: string;
+    modificadoPor?: string;
+    ultimaModificacion?: string;
+    statusRecall?: 'Pendiente' | 'Llamado' | 'Rescatado' | 'Anulado';
+    observacionRecall?: string;
+
+    // --- SEGUIMIENTO POST-ENTREGA ---
+    seguimientoEstado?: 'Pendiente' | 'Programado' | 'Completado' | 'No Requerido';
+    seguimientoFechaProgramada?: string;
+    seguimientoRespuesta?: TreatmentResponse;
+    esCargaManual?: boolean;
+}
+
+export interface TreatmentResponse {
+    tolerancia: 'Buena' | 'Regular' | 'Mala';
+    efectosAdversos: string;
+    mejoraClinica: 'Si' | 'No' | 'Parcial';
+    observaciones: string;
+    fechaRegistro: string;
+    registradoPor: string;
 }
 
 // --- CONFIGURACIÓN DE TRATAMIENTOS ---

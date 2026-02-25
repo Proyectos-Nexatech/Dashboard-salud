@@ -18,7 +18,6 @@ interface PacientesProps {
 export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDeletePatient, onDeleteBatch, epsList }: PacientesProps) {
     const [search, setSearch] = useState('');
     const [filterEstado, setFilterEstado] = useState('');
-    const [filterTipo, setFilterTipo] = useState('');
     const [selectedPatient, setSelectedPatient] = useState<Paciente | null>(null);
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
@@ -43,11 +42,11 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
             const matchSearch = !search ||
                 (p.nombreCompleto && p.nombreCompleto.toLowerCase().includes(searchTerm)) ||
                 (p.numeroId && p.numeroId.toString().includes(searchTerm)) ||
-                (p.medicamento && p.medicamento.toLowerCase().includes(searchTerm));
+                (p.servicio && p.servicio.toLowerCase().includes(searchTerm));
 
             const matchEstado = !filterEstado || p.estado === filterEstado;
-            const matchTipo = !filterTipo || p.tipoPaciente === filterTipo;
-            return matchSearch && matchEstado && matchTipo;
+            const isOncology = p.estado && !p.estado.includes('NO ONC');
+            return matchSearch && matchEstado && isOncology;
         });
 
         if (sortCol) {
@@ -70,7 +69,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
         }
 
         return filtered;
-    }, [pacientes, search, filterEstado, filterTipo, sortCol, sortDir]);
+    }, [pacientes, search, filterEstado, sortCol, sortDir]);
 
     const paginated = useMemo(() => {
         return filteredAndSorted.slice((page - 1) * itemsPerPage, page * itemsPerPage);
@@ -81,7 +80,7 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
     // Reset to page 1 when data changes
     useEffect(() => {
         setPage(1);
-    }, [search, filterEstado, filterTipo, itemsPerPage]);
+    }, [search, filterEstado, itemsPerPage]);
 
     const handleSort = (col: string) => {
         if (sortCol === col) {
@@ -175,10 +174,9 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
             'EPS': p.eps,
             'Municipio': p.municipio,
             'Teléfono': p.telefono,
-            'Medicamento': p.medicamento,
+            'Servicio': p.servicio || 'N/A',
             'Dosis': p.dosisEstandar,
             'Estado Actual': getEstadoBadge(p.estado).label,
-            'Tipo de Paciente': p.tipoPaciente || 'N/A',
             'Total Entregas (Año)': Object.keys(p.entregas).length
         }));
 
@@ -249,7 +247,6 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                 <option value="">Estado: Todos</option>
                                 <option value="AC ONC">Activo Oral</option>
                                 <option value="ACT ONC QXT">Activo + QXT</option>
-                                <option value="ACT NO ONC">Activo No Onc.</option>
                                 <option value="IN S">Suspendido</option>
                                 <option value="IN ST">Inactivo Temporal</option>
                                 <option value="IN F">Fallecido</option>
@@ -261,31 +258,6 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                         <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--gray-400)' }} />
                     </div>
 
-                    {/* Filtro de Tipo */}
-                    <div style={{ position: 'relative', width: 200 }}>
-                        <div className="header-search" style={{
-                            width: '100%', background: 'var(--bg-body)',
-                            border: filterTipo ? '1.5px solid var(--primary)' : '1.5px solid var(--gray-200)',
-                            paddingRight: 35, transition: 'all 0.2s'
-                        }}>
-                            <Users size={18} color={filterTipo ? 'var(--primary)' : 'var(--text-secondary)'} />
-                            <select
-                                style={{
-                                    appearance: 'none', background: 'transparent', border: 'none',
-                                    width: '100%', cursor: 'pointer', outline: 'none',
-                                    fontSize: 14, fontWeight: 500, color: filterTipo ? 'var(--text-main)' : 'var(--text-secondary)'
-                                }}
-                                value={filterTipo}
-                                onChange={e => { setFilterTipo(e.target.value); setPage(1); }}
-                            >
-                                <option value="">Tipo: Todos</option>
-                                <option value="MONOTERAPIA">MONOTERAPIA</option>
-                                <option value="HIBRIDO">HIBRIDO</option>
-                                <option value="QUIMITERAPIA">QUIMITERAPIA</option>
-                            </select>
-                        </div>
-                        <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--gray-400)' }} />
-                    </div>
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginRight: 'auto', marginLeft: 16 }}>
@@ -385,13 +357,12 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                 />
                             </th>
                             {([
-                                { key: 'nombreCompleto', label: 'Paciente' },
-                                { key: 'eps', label: 'EPS / Municipio' },
-                                { key: 'medicamento', label: 'Medicamento' },
-                                { key: 'tipoPaciente', label: 'Tipo Paciente' },
-                                { key: 'estado', label: 'Estado' },
-                                { key: 'entregas', label: 'Entregas Año' },
-                            ] as { key: string; label: string }[]).map(col => (
+                                { key: 'nombreCompleto', label: 'Paciente', minWidth: 200 },
+                                { key: 'eps', label: 'EPS / Municipio', minWidth: 180 },
+                                { key: 'servicio', label: 'Servicio', minWidth: 200 },
+                                { key: 'estado', label: 'Estado', minWidth: 140 },
+                                { key: 'entregas', label: 'Entregas Año', minWidth: 120 },
+                            ] as { key: string; label: string; minWidth: number }[]).map(col => (
                                 <th
                                     key={col.key}
                                     onClick={() => handleSort(col.key)}
@@ -399,7 +370,8 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                         cursor: 'pointer',
                                         userSelect: 'none',
                                         color: sortCol === col.key ? 'var(--primary)' : 'var(--gray-500)',
-                                        whiteSpace: 'nowrap'
+                                        whiteSpace: 'nowrap',
+                                        minWidth: col.minWidth
                                     }}
                                 >
                                     <div style={{ display: 'flex', alignItems: 'center' }}>
@@ -450,11 +422,8 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                         <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{p.municipio}</div>
                                     </td>
                                     <td>
-                                        <div style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.medicamento}</div>
-                                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{p.dosisEstandar}</div>
-                                    </td>
-                                    <td>
-                                        <div style={{ fontWeight: 600, fontSize: 13 }}>{p.tipoPaciente || '-'}</div>
+                                        <div style={{ fontWeight: 600, color: 'var(--primary)' }}>{p.servicio || 'General'}</div>
+                                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ID Paciente: {p.id}</div>
                                     </td>
                                     <td>
                                         <span className={`badge ${badge.badgeClass}`}>{badge.label}</span>
@@ -633,8 +602,8 @@ export default function Pacientes({ pacientes, onAddPatient, onEditPatient, onDe
                                             <span style={{ fontWeight: 500, textAlign: 'right', maxWidth: '70%' }}>{selectedPatient.eps}</span>
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14 }}>
-                                            <span style={{ color: 'var(--text-secondary)' }}>Tipo Paciente</span>
-                                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedPatient.tipoPaciente || 'No definido'}</span>
+                                            <span style={{ color: 'var(--text-secondary)' }}>Servicio</span>
+                                            <span style={{ fontWeight: 700, color: 'var(--primary)' }}>{selectedPatient.servicio || 'No definido'}</span>
                                         </div>
                                     </div>
                                 </div>

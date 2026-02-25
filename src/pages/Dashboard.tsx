@@ -49,14 +49,13 @@ const CHART_COLORS = [
 
 interface DashboardProps {
     pacientes: Paciente[];
-    onDataLoaded: (p: Paciente[], year?: number) => void;
     selectedEps: string;
     selectedMunicipio: string;
     selectedMedicamento: string;
     year: number;
 }
 
-export default function Dashboard({ pacientes, onDataLoaded, selectedEps, selectedMunicipio, selectedMedicamento, year }: DashboardProps) {
+export default function Dashboard({ pacientes, selectedEps, selectedMunicipio, selectedMedicamento, year }: DashboardProps) {
     // ============ DATA_ORIGINAL ============
     const DATA_ORIGINAL = useRef<Paciente[]>(pacientes);
     useEffect(() => { DATA_ORIGINAL.current = pacientes; }, [pacientes]);
