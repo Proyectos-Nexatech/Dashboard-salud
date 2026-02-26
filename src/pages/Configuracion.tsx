@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { subscribeToUsers, updatePermission, UserPermission, createUserMetadata, resetPassword, updateUserProfile, updateAllPermissions } from '../services/userService';
 import { useAuth } from '../context/AuthContext';
+import ConfiguracionAlertas from '../components/ConfiguracionAlertas';
 
 const SECTIONS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -599,6 +600,9 @@ export default function Configuracion() {
                     </div>
                 </div>
             )}
+
+            {/* Módulo de Configuración de Alertas */}
+            <ConfiguracionAlertas />
 
             {/* Feedback Toast */}
             {feedback && (
